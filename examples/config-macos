@@ -1,0 +1,147 @@
+# i3wm-osx example config — macOS-flavored adaptation of grepsedawk's i3 config.
+# Place at ~/.config/i3wm-osx/config (or ~/.i3wm-osx/config).
+#
+# This is intentionally separate from your Linux ~/.i3/config: the modifier
+# defaults differ, XF86 keys aren't available, and most exec commands need
+# macOS equivalents (osascript, open, etc.).
+
+set $mod Mod4   # ⌥ Option on macOS (default; override with I3WM_OSX_MOD4=command)
+
+# ----- startup -----
+exec --no-startup-id caffeinate -dimsu &
+# Replace the X11/Linux helpers from your old config with macOS equivalents:
+# exec --no-startup-id /opt/homebrew/bin/some-macos-tool
+
+# ----- audio keybindings (macOS) -----
+bindsym $mod+F12 exec osascript -e "set volume output volume (output volume of (get volume settings) + 5)"
+bindsym $mod+F11 exec osascript -e "set volume output volume (output volume of (get volume settings) - 5)"
+bindsym $mod+F10 exec osascript -e "set volume with output muted"
+
+# ----- visual -----
+font pango:JetBrainsMono Nerd Font 11
+default_border none
+smart_gaps on
+gaps inner 10
+gaps outer 10
+
+bindsym $mod+z         gaps outer current plus 5
+bindsym $mod+Shift+z   gaps outer current minus 5
+
+focus_on_window_activation focus
+
+# Dracula theme
+client.focused          #6272A4 #6272A4 #F8F8F2 #6272A4 #6272A4
+client.focused_inactive #44475A #44475A #F8F8F2 #44475A #44475A
+client.unfocused        #282A36 #282A36 #BFBFBF #282A36 #282A36
+client.urgent           #44475A #FF5555 #F8F8F2 #FF5555 #FF5555
+client.placeholder      #282A36 #282A36 #F8F8F2 #282A36 #282A36
+client.background       #F8F8F2
+
+bar {
+  position bottom
+  status_command echo '[{"full_text":"i3wm-osx"}]'
+  workspace_min_width 25
+  tray_padding 1
+  colors {
+    background #282A36
+    statusline #F8F8F2
+    separator  #44475A
+
+    focused_workspace  #44475A #44475A #F8F8F2
+    active_workspace   #282A36 #44475A #F8F8F2
+    inactive_workspace #282A36 #282A36 #BFBFBF
+    urgent_workspace   #FF5555 #FF5555 #F8F8F2
+    binding_mode       #FF5555 #FF5555 #F8F8F2
+  }
+}
+
+floating_modifier $mod
+
+# ----- launching -----
+bindsym $mod+Return exec open -a Alacritty
+bindsym $mod+b      exec open -a "Google Chrome"
+
+# ----- window mgmt -----
+bindsym $mod+Shift+q kill
+
+bindsym $mod+h focus left
+bindsym $mod+j focus down
+bindsym $mod+k focus up
+bindsym $mod+l focus right
+bindsym $mod+Left  focus left
+bindsym $mod+Down  focus down
+bindsym $mod+Up    focus up
+bindsym $mod+Right focus right
+
+bindsym $mod+Shift+h move left
+bindsym $mod+Shift+j move down
+bindsym $mod+Shift+k move up
+bindsym $mod+Shift+l move right
+bindsym $mod+Shift+Left  move left
+bindsym $mod+Shift+Down  move down
+bindsym $mod+Shift+Up    move up
+bindsym $mod+Shift+Right move right
+
+bindsym $mod+control+h split h
+bindsym $mod+v split v
+bindsym $mod+f fullscreen toggle
+
+bindsym $mod+w layout tabbed
+bindsym $mod+e layout toggle split
+
+bindsym $mod+Shift+space floating toggle
+bindsym $mod+space       focus mode_toggle
+bindsym $mod+a           focus parent
+
+# ----- workspaces -----
+bindsym $mod+1 workspace 1
+bindsym $mod+2 workspace 2
+bindsym $mod+3 workspace 3
+bindsym $mod+4 workspace 4
+bindsym $mod+5 workspace 5
+bindsym $mod+6 workspace 6
+bindsym $mod+7 workspace 7
+bindsym $mod+8 workspace 8
+bindsym $mod+9 workspace 9
+bindsym $mod+0 workspace 10
+workspace_auto_back_and_forth yes
+
+bindsym $mod+Shift+1 move container to workspace 1
+bindsym $mod+Shift+2 move container to workspace 2
+bindsym $mod+Shift+3 move container to workspace 3
+bindsym $mod+Shift+4 move container to workspace 4
+bindsym $mod+Shift+5 move container to workspace 5
+bindsym $mod+Shift+6 move container to workspace 6
+bindsym $mod+Shift+7 move container to workspace 7
+bindsym $mod+Shift+8 move container to workspace 8
+bindsym $mod+Shift+9 move container to workspace 9
+bindsym $mod+Shift+0 move container to workspace 10
+
+# ----- meta -----
+bindsym $mod+Shift+c reload
+bindsym $mod+Shift+r restart
+bindsym $mod+Shift+e exit
+
+# ----- resize mode -----
+mode "resize" {
+    bindsym j resize shrink width 10 px or 10 ppt
+    bindsym k resize grow height 10 px or 10 ppt
+    bindsym l resize shrink height 10 px or 10 ppt
+    bindsym semicolon resize grow width 10 px or 10 ppt
+
+    bindsym Left  resize shrink width 10 px or 10 ppt
+    bindsym Down  resize grow height 10 px or 10 ppt
+    bindsym Up    resize shrink height 10 px or 10 ppt
+    bindsym Right resize grow width 10 px or 10 ppt
+
+    bindsym Return mode "default"
+    bindsym Escape mode "default"
+}
+bindsym $mod+r mode "resize"
+
+# ----- move workspaces between monitors -----
+bindsym $mod+Tab       exec i3-msg move workspace to output right
+bindsym $mod+Shift+Tab exec i3-msg move workspace to output left
+
+# ----- screenshot -----
+bindsym $mod+shift+s exec screencapture -i ~/Desktop/screenshot-$(date +%s).png
