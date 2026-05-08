@@ -1,0 +1,97 @@
+name: Build & sign release tarball
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Tag to build (e.g. v0.1.1)'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+
+      - name: Resolve version
+        id: ver
+        run: |
+          ref="${{ github.event.inputs.tag || github.ref_name }}"
+          echo "tag=${ref}" >> "$GITHUB_OUTPUT"
+          echo "version=${ref#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Import signing cert
+        env:
+          CERT_B64: ${{ secrets.MACOS_CERT_BASE64 }}
+          CERT_PASS: ${{ secrets.MACOS_CERT_PASSWORD }}
+        run: |
+          set -euo pipefail
+          KEYCHAIN_PASS=$(openssl rand -hex 16)
+          echo "$CERT_B64" | base64 -d > /tmp/cert.p12
+          security create-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASS" build.keychain
+          security set-keychain-settings -lut 3600 build.keychain
+          security import /tmp/cert.p12 -k build.keychain -P "$CERT_PASS" \
+            -A -t cert -f pkcs12 -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: \
+            -s -k "$KEYCHAIN_PASS" build.keychain
+          rm -f /tmp/cert.p12
+          security find-identity -p codesigning build.keychain
+
+      - name: Build .app
+        run: |
+          set -euo pipefail
+          swift build -c release
+          BIN_DIR=$(swift build -c release --show-bin-path)
+
+          APP=build/i3wm-osx.app
+          rm -rf "$APP"
+          mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
+          cp "$BIN_DIR/i3wm-osx" "$APP/Contents/MacOS/i3wm-osx"
+          cp "$BIN_DIR/i3-msg"   "$APP/Contents/MacOS/i3-msg"
+          cp Resources/Info.plist "$APP/Contents/Info.plist"
+          printf 'APPL????' > "$APP/Contents/PkgInfo"
+
+          codesign --force --deep --sign "i3wm-osx-ci" \
+            --identifier "org.piechowski.i3wm-osx" "$APP"
+          codesign -dv "$APP"
+
+      - name: Tarball
+        id: tarball
+        run: |
+          set -euo pipefail
+          ARCH=$(uname -m)
+          NAME="i3wm-osx-${{ steps.ver.outputs.version }}-${ARCH}.tar.gz"
+          tar -C build -czf "$NAME" i3wm-osx.app
+          shasum -a 256 "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          echo "sha256=$(shasum -a 256 "$NAME" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
+
+      - name: Attach to release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.ver.outputs.tag }}
+          files: ${{ steps.tarball.outputs.name }}
+          fail_on_unmatched_files: true
+
+      - name: Job summary
+        run: |
+          {
+            echo "## i3wm-osx ${{ steps.ver.outputs.tag }}"
+            echo ""
+            echo "**File:** \`${{ steps.tarball.outputs.name }}\`"
+            echo "**SHA256:** \`${{ steps.tarball.outputs.sha256 }}\`"
+            echo ""
+            echo "Update the formula at grepsedawk/homebrew-tap with this URL + sha:"
+            echo ""
+            echo "    url \"https://github.com/grepsedawk/i3wm-osx/releases/download/${{ steps.ver.outputs.tag }}/${{ steps.tarball.outputs.name }}\""
+            echo "    sha256 \"${{ steps.tarball.outputs.sha256 }}\""
+          } >> "$GITHUB_STEP_SUMMARY"
