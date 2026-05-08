@@ -28,7 +28,32 @@ What doesn't work yet:
 - Spaces (macOS Spaces) integration — windows are placed on the current macOS Space; we don't move them across Spaces
 - `restart` does not preserve in-place state; it re-execs from scratch
 
-## Setup (do these once, in order)
+## Install via Homebrew
+
+```bash
+brew tap grepsedawk/tap
+brew install i3wm-osx
+
+mkdir -p ~/.config/i3wm-osx
+cp "$(brew --prefix)/etc/i3wm-osx/config.example" ~/.config/i3wm-osx/config
+
+brew services start i3wm-osx     # autostart on login
+# or one-shot:  open "$(brew --prefix)/opt/i3wm-osx/i3wm-osx.app"
+```
+
+This installs a prebuilt, signed `.app` bundle at `$(brew --prefix)/opt/i3wm-osx/`.
+The signing identity is stable across releases, so Accessibility / Input
+Monitoring grants survive `brew upgrade`. First launch needs those permissions
+granted to the bundle — see [Permissions](#permissions).
+
+> ⚠️ Apple Silicon only for now (`depends_on arch: :arm64`). Intel users
+> need the [manual build](#manual-build).
+>
+> ⚠️ Gatekeeper will warn "unidentified developer" on first launch (the cert
+> is self-signed, not from Apple). Right-click the bundle in Finder → Open,
+> then click Open in the dialog. Subsequent launches go through silently.
+
+## Manual build
 
 ```bash
 # 1. One-time: create a self-signed code-signing identity so macOS TCC
@@ -48,16 +73,21 @@ mkdir -p ~/.config/i3wm-osx
 cp examples/config-macos ~/.config/i3wm-osx/config
 ```
 
-Now grant permissions to **the app bundle** (not your terminal):
+## Permissions
 
-1. **Accessibility**: System Settings → Privacy & Security → Accessibility → click `+` → navigate to `~/Code/i3wm-osx/build/i3wm-osx.app` → enable. **Remove any stale `Alacritty` / `Terminal` entry that was added by mistake** — TCC does not auto-clean those, and a wrongly-granted terminal will make the prompt name *that* app every time you run from it.
-2. **Input Monitoring**: same thing for the global hotkey tap.
+On first launch, macOS pops a dialog asking for **Accessibility** access — click "Open System Settings" and toggle i3wm-osx on. Then do the same for **Input Monitoring** (needed for global hotkeys). The daemon polls every 2s and re-bootstraps as soon as both are granted, so you don't need to restart it.
+
+If you previously granted Accessibility to your terminal (Alacritty, iTerm, Terminal, etc.) by mistake, **remove that entry** — TCC won't auto-clean it, and a wrongly-granted terminal will make the prompt name *that* app every time you launch from a shell.
 
 ## Running
 
 ```bash
-open build/i3wm-osx.app           # detaches from your shell, no terminal in TCC chain
-# or, with stderr visible:
+# Brew install:
+open "$(brew --prefix)/opt/i3wm-osx/i3wm-osx.app"
+
+# Manual build:
+open build/i3wm-osx.app
+# or with stderr visible:
 build/i3wm-osx.app/Contents/MacOS/i3wm-osx
 ```
 
@@ -97,6 +127,10 @@ Linux-only commands like `pactl`, `rofi`, `xmodmap` will simply fail to exec; re
 - `build-app.sh` — main build path. Compiles via SwiftPM, assembles `build/i3wm-osx.app`, codesigns with the identity from `setup-signing.sh` (or ad-hoc with a warning).
 - `scripts/dev-run.sh` — dev convenience. `swift build -c release` + execs the bare binary against `~/.i3/config` (or the bundled example). Skips the `.app` bundle, so it does **not** get TCC permissions — useful only when iterating on code that doesn't need AX.
 - `scripts/macos-tune-animations.sh on|off` — disables (or restores) macOS-wide window/Dock animations so workspace switches feel like i3 on Linux. Affects every app, not just i3wm-osx.
+
+## Releases
+
+- `.github/workflows/release.yml` — on `v*` tag push, builds `.app` on macOS-14 (arm64), signs with the `i3wm-osx-ci` cert imported from `MACOS_CERT_BASE64` / `MACOS_CERT_PASSWORD` GH secrets, tarballs with the bundled config example, attaches to the GH release. The Homebrew formula at [grepsedawk/homebrew-tap](https://github.com/grepsedawk/homebrew-tap) installs that prebuilt artifact — same cdhash for every user, so TCC grants persist across `brew upgrade`.
 
 ## Architecture
 
