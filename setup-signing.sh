@@ -7,7 +7,7 @@
 # With this:    same identity   → cdhash stable              → grant sticks.
 set -euo pipefail
 
-CERT_NAME="${CERT_NAME:-i3wm-osx-codesign}"
+CERT_NAME="${CERT_NAME:-i3wm-osx-ci}"
 KEYCHAIN="$HOME/Library/Keychains/login.keychain-db"
 
 if security find-identity -v -p codesigning 2>/dev/null | grep -q "\"$CERT_NAME\""; then

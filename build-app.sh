@@ -30,7 +30,7 @@ cp "${MSG_BIN}" "${MACOS_DIR}/i3-msg"
 cp Resources/Info.plist "${APP_DIR}/Contents/Info.plist"
 printf 'APPL????' > "${APP_DIR}/Contents/PkgInfo"
 
-SIGN_ID="${SIGN_ID:-i3wmosx-codesign}"
+SIGN_ID="${SIGN_ID:-i3wm-osx-ci}"
 # `-v` filters out self-signed identities (CSSMERR_TP_NOT_TRUSTED) but codesign
 # itself accepts them just fine, so we look without the validity filter.
 if security find-identity -p codesigning 2>/dev/null | grep -q "\"${SIGN_ID}\""; then
