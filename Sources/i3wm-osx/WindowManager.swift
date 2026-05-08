@@ -445,6 +445,10 @@ final class WindowManager {
                     var p: pid_t = 0
                     AXUIElementGetPid(elem, &p)
                     if p > 0 { mgr.handleAppHidden(pid: p) }
+                } else if n == kAXApplicationShownNotification as String {
+                    var p: pid_t = 0
+                    AXUIElementGetPid(elem, &p)
+                    if p > 0 { mgr.handleAppShown(pid: p) }
                 } else if n == kAXWindowCreatedNotification as String {
                     var p: pid_t = 0
                     AXUIElementGetPid(elem, &p)
@@ -465,6 +469,7 @@ final class WindowManager {
         AXObserverAddNotification(obs, appElem, kAXWindowCreatedNotification as CFString, refcon)
         AXObserverAddNotification(obs, appElem, kAXFocusedWindowChangedNotification as CFString, refcon)
         AXObserverAddNotification(obs, appElem, kAXApplicationHiddenNotification as CFString, refcon)
+        AXObserverAddNotification(obs, appElem, kAXApplicationShownNotification as CFString, refcon)
         CFRunLoopAddSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
         observers[pid] = obs
     }
@@ -559,6 +564,28 @@ final class WindowManager {
         }
         applyAllLayouts()
         bar?.refresh()
+    }
+
+    /// Called when AX reports an application became shown — typically the
+    /// user did `open -a <app>` against an already-running app, clicked its
+    /// dock icon, or ⌘-tabbed to it. macOS reveals all of the app's
+    /// previously-app-hidden windows wherever the user happens to be looking,
+    /// which would otherwise leave a window from another workspace stranded
+    /// on the visible screen. Follow focus to the workspace the focused
+    /// window actually belongs to.
+    func handleAppShown(pid: pid_t) {
+        let appElem = AXUIElementCreateApplication(pid)
+        guard let win: AXUIElement = AX.attribute(appElem, kAXFocusedWindowAttribute),
+              let id = AX.windowID(win), id != 0 else { return }
+        guard let c = containerByWindowID[id], let target = workspaceContaining(c) else { return }
+        // Our own showWindow during a workspace switch fires this too. By the
+        // time the notification drains we've already re-focused the target
+        // workspace's leaf, so the focused window's tracked workspace is one
+        // of the active ones — skip the follow.
+        let visibleWsIDs = Set(outputs.compactMap { $0.activeWorkspace.map { ObjectIdentifier($0) } })
+        if visibleWsIDs.contains(ObjectIdentifier(target)) { return }
+        Logger.info("app shown externally: \(describe(c)) is on ws \(target.name) — switching")
+        switchWorkspace(name: target.name)
     }
 
     func syncFocusFromSystem() {
