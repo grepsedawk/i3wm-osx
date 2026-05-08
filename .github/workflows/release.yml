@@ -64,13 +64,17 @@ jobs:
             --identifier "org.piechowski.i3wm-osx" "$APP"
           codesign -dv "$APP"
 
+          mkdir -p build/dist
+          mv "$APP" build/dist/
+          cp examples/config-macos build/dist/config.example
+
       - name: Tarball
         id: tarball
         run: |
           set -euo pipefail
           ARCH=$(uname -m)
           NAME="i3wm-osx-${{ steps.ver.outputs.version }}-${ARCH}.tar.gz"
-          tar -C build -czf "$NAME" i3wm-osx.app
+          tar -C build/dist -czf "$NAME" i3wm-osx.app config.example
           shasum -a 256 "$NAME"
           echo "name=$NAME" >> "$GITHUB_OUTPUT"
           echo "sha256=$(shasum -a 256 "$NAME" | cut -d' ' -f1)" >> "$GITHUB_OUTPUT"
