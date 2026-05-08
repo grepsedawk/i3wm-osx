@@ -2,6 +2,31 @@
 
 A tiling window manager for macOS that reads i3 config files and behaves like i3wm.
 
+## Install via Homebrew
+
+```bash
+brew tap grepsedawk/tap
+brew install i3wm-osx
+
+mkdir -p ~/.config/i3wm-osx
+cp "$(brew --prefix)/etc/i3wm-osx/config.example" ~/.config/i3wm-osx/config
+
+brew services start i3wm-osx     # autostart on login
+# or one-shot:  open "$(brew --prefix)/opt/i3wm-osx/i3wm-osx.app"
+```
+
+This installs a prebuilt, signed `.app` bundle at `$(brew --prefix)/opt/i3wm-osx/`.
+The signing identity is stable across releases, so Accessibility / Input
+Monitoring grants survive `brew upgrade`. First launch needs those permissions
+granted to the bundle — see [Permissions](#permissions).
+
+> ⚠️ Apple Silicon only for now (`depends_on arch: :arm64`). Intel users
+> need the [manual build](#manual-build).
+>
+> ⚠️ Gatekeeper will warn "unidentified developer" on first launch (the cert
+> is self-signed, not from Apple). Right-click the bundle in Finder → Open,
+> then click Open in the dialog. Subsequent launches go through silently.
+
 ## Status
 
 **Early prototype.** Targets the [grepsedawk i3 config](https://github.com/grepsedawk/.dotfiles/blob/master/.i3/config) as its compatibility benchmark.
@@ -27,31 +52,6 @@ What doesn't work yet:
 - `move scratchpad`, `sticky`, `urgent` hint
 - Spaces (macOS Spaces) integration — windows are placed on the current macOS Space; we don't move them across Spaces
 - `restart` does not preserve in-place state; it re-execs from scratch
-
-## Install via Homebrew
-
-```bash
-brew tap grepsedawk/tap
-brew install i3wm-osx
-
-mkdir -p ~/.config/i3wm-osx
-cp "$(brew --prefix)/etc/i3wm-osx/config.example" ~/.config/i3wm-osx/config
-
-brew services start i3wm-osx     # autostart on login
-# or one-shot:  open "$(brew --prefix)/opt/i3wm-osx/i3wm-osx.app"
-```
-
-This installs a prebuilt, signed `.app` bundle at `$(brew --prefix)/opt/i3wm-osx/`.
-The signing identity is stable across releases, so Accessibility / Input
-Monitoring grants survive `brew upgrade`. First launch needs those permissions
-granted to the bundle — see [Permissions](#permissions).
-
-> ⚠️ Apple Silicon only for now (`depends_on arch: :arm64`). Intel users
-> need the [manual build](#manual-build).
->
-> ⚠️ Gatekeeper will warn "unidentified developer" on first launch (the cert
-> is self-signed, not from Apple). Right-click the bundle in Finder → Open,
-> then click Open in the dialog. Subsequent launches go through silently.
 
 ## Manual build
 
