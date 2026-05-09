@@ -69,15 +69,15 @@ enum WindowDiscovery {
         if AX.isMinimized(element) { return false }
         let role = AX.role(element)
         guard role == kAXWindowRole else { return false }
-        if let sub = AX.subrole(element) {
-            switch sub {
-            case kAXStandardWindowSubrole: return true
-            case kAXDialogSubrole, kAXSystemDialogSubrole, kAXFloatingWindowSubrole, kAXSystemFloatingWindowSubrole:
-                return false
-            default: break
-            }
-        }
+        // Brave/Chromium adopt-time check passes a normal-looking
+        // AXStandardWindow, then silently mutates it: subrole disappears,
+        // size collapses to 0×0 (e.g. inactive Private-mode tabs).
+        // Re-check size first so post-mutation windows fail this gate even
+        // if they were managed at adoption time.
         guard let size = AX.size(element), size.width > 50, size.height > 50 else { return false }
+        if let sub = AX.subrole(element) {
+            return sub == kAXStandardWindowSubrole
+        }
         return true
     }
 }

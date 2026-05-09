@@ -28,6 +28,11 @@ enum AX {
         return AXValueGetValue(raw, .cgSize, &s) ? s : nil
     }
 
+    static func frame(_ element: AXUIElement) -> CGRect? {
+        guard let p = position(element), let s = size(element) else { return nil }
+        return CGRect(origin: p, size: s)
+    }
+
     @discardableResult
     static func setPosition(_ element: AXUIElement, _ p: CGPoint) -> Bool {
         var pt = p

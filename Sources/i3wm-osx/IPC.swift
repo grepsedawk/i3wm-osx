@@ -222,6 +222,13 @@ final class IPCServer {
             dict["name"] = w.title
             dict["window_class"] = w.appName
             dict["window"] = Int(w.id)
+            dict["pid"] = Int(w.pid)
+            dict["hidden_by_us"] = w.hiddenByUs
+            dict["floating"] = w.isFloating
+            dict["subrole"] = AX.subrole(w.element) ?? ""
+            if let f = AX.frame(w.element) {
+                dict["ax_frame"] = ["x": f.minX, "y": f.minY, "width": f.width, "height": f.height]
+            }
         } else {
             dict["type"] = "con"
             dict["nodes"] = c.children.map { encodeContainer($0) }
