@@ -460,7 +460,10 @@ final class WindowManager {
             let n = notif as String
             DispatchQueue.main.async {
                 if n == kAXUIElementDestroyedNotification as String {
-                    if let id = AX.windowID(elem) {
+                    // _AXUIElementGetWindow fails on a dead element; fall back to identity lookup.
+                    let id = AX.windowID(elem).flatMap { $0 == 0 ? nil : $0 }
+                        ?? mgr.windowsByID.first(where: { CFEqual($0.value.element, elem) })?.key
+                    if let id = id {
                         mgr.release(id: id); mgr.applyAllLayouts(); mgr.bar?.refresh()
                     }
                 } else if n == kAXFocusedWindowChangedNotification as String {
