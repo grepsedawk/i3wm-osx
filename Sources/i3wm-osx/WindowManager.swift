@@ -13,7 +13,7 @@ final class WindowManager {
     var focused: Container?
     var pendingSplit: Orientation = .none
     var mode: String = "default"
-    var barInset: CGFloat = 24
+    var barInset: CGFloat = 28
 
     var config: I3Config = I3Config()
     weak var bar: BarController?

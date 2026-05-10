@@ -147,7 +147,7 @@ final class BarWindow: NSPanel {
     let view: BarView
     weak var screenRef: NSScreen?
     weak var controller: BarController?
-    static let height: CGFloat = 24
+    static let height: CGFloat = 28
 
     init(screen: NSScreen, controller: BarController) {
         let visible = screen.visibleFrame
@@ -207,7 +207,7 @@ final class BarView: NSView {
         let y: CGFloat = 0
         let h = bounds.height
 
-        let fontSize: CGFloat = 12
+        let fontSize: CGFloat = 13
         let font = NSFont(name: "JetBrainsMono Nerd Font", size: fontSize) ?? NSFont.menuFont(ofSize: fontSize)
 
         let curWS = mgr?.ledger.current
@@ -278,11 +278,11 @@ final class BarView: NSView {
         }
 
         let statusColor = hex(cfg.bar.colors.statusline, fallback: NSColor(srgbRed: 0xF8/255.0, green: 0xF8/255.0, blue: 0xF2/255.0, alpha: 1.0))
-        let blocks = ctrl.statusBlocks
+        let separatorColor = hex(cfg.bar.colors.separator, fallback: NSColor(srgbRed: 0xA0/255.0, green: 0xA4/255.0, blue: 0xB8/255.0, alpha: 1.0))
+        let blocks = ctrl.statusBlocks.filter { !$0.text.isEmpty }
         var rx: CGFloat = bounds.width - 8
-        for block in blocks.reversed() {
+        for (i, block) in blocks.reversed().enumerated() {
             let text = block.text as NSString
-            if text.length == 0 { continue }
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: font,
                 .foregroundColor: block.color ?? statusColor,
@@ -290,7 +290,15 @@ final class BarView: NSView {
             let s = text.size(withAttributes: attrs)
             rx -= s.width
             text.draw(at: NSPoint(x: rx, y: (h - s.height) / 2 - 1), withAttributes: attrs)
-            rx -= 12
+            if i < blocks.count - 1 {
+                rx -= 8
+                let sep = "|" as NSString
+                let sepAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: separatorColor]
+                let ss = sep.size(withAttributes: sepAttrs)
+                rx -= ss.width
+                sep.draw(at: NSPoint(x: rx, y: (h - ss.height) / 2 - 1), withAttributes: sepAttrs)
+                rx -= 8
+            }
         }
         _ = screenFrame
     }
