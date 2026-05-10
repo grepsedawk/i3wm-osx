@@ -852,6 +852,7 @@ final class WindowManager {
         guard let cur = focused else { Logger.info("move-to-ws \(name): no current window"); return }
         let ws = ledger.workspaces.first(where: { $0.name == name }) ?? ledger.ensure(name: name)
         if ws.output == nil { ws.output = outputs.first }
+        if workspaceContaining(cur) === ws { return }
         let from = ledger.current?.name ?? "?"
         Logger.info("move-to-ws: \(describe(cur)) — ws \(from) → ws \(name)")
         let prevParent = cur.parent
