@@ -34,10 +34,29 @@ final class Output {
     }
 
     var visibleFrame: CGRect {
-        let s = screen.visibleFrame
-        let main = NSScreen.screens.first?.frame ?? s
-        let flippedY = main.height - (s.origin.y + s.height)
-        return CGRect(x: s.origin.x, y: flippedY, width: s.width, height: s.height)
+        // screen.visibleFrame returns screen.frame in LSUIElement apps,
+        // so reconstruct the menu-bar inset ourselves — but only when
+        // the menu bar is actually pinned. With auto-hide on, the user
+        // wants tiles flush to the top edge.
+        let f = screen.frame
+        let vf = screen.visibleFrame
+        let menuBarHidden = UserDefaults.standard.bool(forKey: "_HIHideMenuBar")
+        let usable: CGRect
+        if vf != f || menuBarHidden {
+            usable = vf
+        } else {
+            let insets = screen.safeAreaInsets
+            let menuBarTop = max(insets.top, NSStatusBar.system.thickness)
+            usable = CGRect(
+                x: f.origin.x + insets.left,
+                y: f.origin.y + insets.bottom,
+                width: f.width - insets.left - insets.right,
+                height: f.height - menuBarTop - insets.bottom
+            )
+        }
+        let main = NSScreen.screens.first?.frame ?? f
+        let flippedY = main.height - (usable.origin.y + usable.height)
+        return CGRect(x: usable.origin.x, y: flippedY, width: usable.width, height: usable.height)
     }
 
     var name: String {
