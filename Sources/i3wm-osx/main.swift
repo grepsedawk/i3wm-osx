@@ -27,7 +27,7 @@ if args.contains("--help") || args.contains("-h") {
 }
 
 if args.contains("--version") {
-    print("i3wm-osx 0.1.0")
+    print("i3wm-osx 0.2.0")
     exit(0)
 }
 
@@ -55,8 +55,13 @@ if args.contains("--check") {
     }
 }
 
+let restoreStatePath: String? = {
+    if let i = args.firstIndex(of: "--restore-state"), i + 1 < args.count { return args[i + 1] }
+    return nil
+}()
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let coordinator = I3App(configPath: configPath)
+let coordinator = I3App(configPath: configPath, restoreStatePath: restoreStatePath)
 coordinator.start()
 app.run()

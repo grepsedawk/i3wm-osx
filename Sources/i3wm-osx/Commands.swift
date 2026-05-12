@@ -285,7 +285,7 @@ enum CommandExecutor {
         case .reload:
             app.reload(); return true
         case .restart:
-            relaunch(); return true
+            relaunch(app: app); return true
         case .exit:
             NSApplication.shared.terminate(nil); return true
         case .nop:
@@ -293,12 +293,38 @@ enum CommandExecutor {
         }
     }
 
-    private static func relaunch() {
-        let path = ProcessInfo.processInfo.arguments[0]
+    private static func relaunch(app: I3App) {
+        // Prefer Bundle.main.executablePath — survives the installer-tempdir
+        // case where argv[0] points to a path that's been moved by the time
+        // restart fires (e.g. atomic .app replacement during an update).
+        let binary = Bundle.main.executablePath ?? ProcessInfo.processInfo.arguments[0]
+
+        var newArgs = Array(ProcessInfo.processInfo.arguments.dropFirst())
+        var i = 0
+        while i < newArgs.count {
+            if newArgs[i] == "--restore-state" {
+                let drop = min(2, newArgs.count - i)
+                newArgs.removeSubrange(i..<i + drop)
+            } else {
+                i += 1
+            }
+        }
+
+        let snap = RestartState.capture(app.manager)
+        if let path = RestartState.write(snap) {
+            newArgs.append(contentsOf: ["--restore-state", path])
+            Logger.info("restart: snapshot at \(path) (\(snap.workspaces.count) workspaces, \(snap.windowState.count) windows)")
+        }
+
         let task = Process()
-        task.launchPath = path
-        task.arguments = Array(ProcessInfo.processInfo.arguments.dropFirst())
-        try? task.run()
+        task.launchPath = binary
+        task.arguments = newArgs
+        do {
+            try task.run()
+        } catch {
+            Logger.warn("restart: launch failed: \(error)")
+            return
+        }
         NSApplication.shared.terminate(nil)
     }
 }

@@ -47,7 +47,7 @@ final class Container {
 
     static var nextID: Int = 1
 
-    let id: Int
+    var id: Int
     var kind: Kind
     var layout: Layout = .splitH
     var children: [Container] = []

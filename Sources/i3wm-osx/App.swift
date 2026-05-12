@@ -3,14 +3,16 @@ import Foundation
 
 final class I3App {
     let configPath: String
+    let restoreStatePath: String?
     var config: I3Config = I3Config()
     let manager: WindowManager
     let hotkeys: HotkeyManager
     let ipc: IPCServer
     let bar: BarController
 
-    init(configPath: String) {
+    init(configPath: String, restoreStatePath: String? = nil) {
         self.configPath = configPath
+        self.restoreStatePath = restoreStatePath
         self.manager = WindowManager()
         self.hotkeys = HotkeyManager()
         self.ipc = IPCServer()
@@ -33,18 +35,39 @@ final class I3App {
         loadConfig()
         Logger.info("screens: \(NSScreen.screens.count) — \(NSScreen.screens.map { $0.localizedName }.joined(separator: ", "))")
         manager.bind(config: config, bar: bar)
-        manager.bootstrap()
+
+        let restoredSnapshot: RestartSnapshot? = restoreStatePath.flatMap { path in
+            let snap = RestartState.load(path)
+            try? FileManager.default.removeItem(atPath: path)
+            return snap
+        }
+
+        // Defer layout when restoring so the bootstrap-built tree (all windows
+        // shoved into the current workspace) never gets rendered — we draw
+        // once, with the restored tree.
+        manager.bootstrap(deferLayout: restoredSnapshot != nil)
+        if let snap = restoredSnapshot {
+            Logger.info("restoring state: \(snap.workspaces.count) workspaces, \(snap.windowState.count) window states, mode=\(snap.mode)")
+            manager.applyRestoreSnapshot(snap)
+        }
         Logger.info("bootstrap complete — outputs=\(manager.outputs.count) windows=\(manager.windowsByID.count) workspaces=\(manager.ledger.workspaces.count)")
         hotkeys.bind(commandHandler: { [weak self] cmd in self?.run(commandText: cmd) })
         hotkeys.apply(config: config)
         hotkeys.start()
+        if let snap = restoredSnapshot, snap.mode != "default" {
+            hotkeys.setMode(snap.mode)
+        }
         Logger.info("hotkey tap: \(hotkeys.isInstalled ? "INSTALLED" : "FAILED (need Input Monitoring permission)")")
         bar.bind(config: config, manager: manager)
         bar.start()
         Logger.info("bar windows: \(bar.windows.count)")
         ipc.bind(commandHandler: { [weak self] cmd in self?.run(commandText: cmd) ?? "[]" }, manager: manager, config: { [weak self] in self?.config ?? I3Config() })
         ipc.start()
-        runStartupExecs(once: true)
+        // On restart, once-only `exec` directives already ran in the prior
+        // instance; only `exec_always` (once=false) re-fires.
+        if restoreStatePath == nil {
+            runStartupExecs(once: true)
+        }
         runStartupExecs(once: false)
         startTrustWatcher()
 

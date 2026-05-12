@@ -45,14 +45,14 @@ final class WindowManager {
     private var intentFocusAt: TimeInterval = 0
     private static let intentFocusGracePeriod: TimeInterval = 0.4
 
-    private var modeStack: [String] = []
+    var modeStack: [String] = []
 
     func bind(config: I3Config, bar: BarController) {
         self.config = config
         self.bar = bar
     }
 
-    func bootstrap() {
+    func bootstrap(deferLayout: Bool = false) {
         rebuildOutputs()
         if Container.nextID < 100 { Container.nextID = 100 }
         let names = (1...10).map(String.init)
@@ -75,8 +75,10 @@ final class WindowManager {
             }
         }
         scanExistingWindows()
-        applyAllLayouts()
-        bar?.refresh()
+        if !deferLayout {
+            applyAllLayouts()
+            bar?.refresh()
+        }
         Logger.info("scanned: \(windowsByID.count) windows across \(outputs.count) output(s)")
     }
 
