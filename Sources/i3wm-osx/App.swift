@@ -110,7 +110,7 @@ final class I3App {
         manager.bind(config: config, bar: bar)
         hotkeys.apply(config: config)
         bar.bind(config: config, manager: manager)
-        bar.refresh()
+        bar.rebuildWindows()
     }
 
     private func startTrustWatcher() {

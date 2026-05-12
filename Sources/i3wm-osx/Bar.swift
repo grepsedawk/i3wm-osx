@@ -1,6 +1,83 @@
 import AppKit
 import Foundation
 
+private struct PangoFont {
+    var family: String?
+    var size: CGFloat = 13
+    var traits: NSFontTraitMask = []
+    var weight: Int = 5
+}
+
+private func parsePangoFont(_ raw: String?) -> PangoFont {
+    var out = PangoFont()
+    guard var s = raw?.trimmingCharacters(in: .whitespaces), !s.isEmpty else { return out }
+    if s.lowercased().hasPrefix("pango:") { s = String(s.dropFirst("pango:".count)).trimmingCharacters(in: .whitespaces) }
+    if let spaceIdx = s.lastIndex(of: " ") {
+        let tail = s[s.index(after: spaceIdx)...].trimmingCharacters(in: .whitespaces)
+        if let n = Double(tail) {
+            out.size = CGFloat(n)
+            s = s[..<spaceIdx].trimmingCharacters(in: .whitespaces)
+        }
+    }
+    var parts = s.split(separator: " ").map(String.init)
+    while let last = parts.last?.lowercased() {
+        switch last {
+        case "italic", "oblique": out.traits.insert(.italicFontMask); parts.removeLast()
+        case "bold": out.traits.insert(.boldFontMask); out.weight = 9; parts.removeLast()
+        case "ultralight", "thin": out.weight = 2; parts.removeLast()
+        case "light": out.weight = 3; parts.removeLast()
+        case "medium": out.weight = 6; parts.removeLast()
+        case "semibold": out.weight = 8; parts.removeLast()
+        case "heavy", "black": out.weight = 10; parts.removeLast()
+        case "condensed": out.traits.insert(.condensedFontMask); parts.removeLast()
+        case "expanded": out.traits.insert(.expandedFontMask); parts.removeLast()
+        default: out.family = parts.joined(separator: " "); return out
+        }
+    }
+    return out
+}
+
+func barFont(for cfg: I3Config) -> NSFont {
+    let p = parsePangoFont(cfg.bar.font)
+    if let f = p.family, !f.isEmpty {
+        if let nf = resolveFamilyMember(family: f, traits: p.traits, weight: p.weight, size: p.size) {
+            return nf
+        }
+        if let nf = NSFontManager.shared.font(withFamily: f, traits: p.traits, weight: p.weight, size: p.size) {
+            return nf
+        }
+        if let nf = NSFont(name: f, size: p.size) { return nf }
+    }
+    return NSFont(name: "JetBrainsMono Nerd Font", size: p.size) ?? NSFont.menuFont(ofSize: p.size)
+}
+
+private func resolveFamilyMember(family: String, traits: NSFontTraitMask, weight: Int, size: CGFloat) -> NSFont? {
+    guard let members = NSFontManager.shared.availableMembers(ofFontFamily: family), !members.isEmpty else { return nil }
+    struct Member { let name: String; let weight: Int; let traits: UInt }
+    let parsed: [Member] = members.compactMap { m in
+        guard m.count >= 4,
+              let name = m[0] as? String,
+              let w = m[2] as? Int,
+              let t = m[3] as? UInt else { return nil }
+        // Skip the ambiguous bare-family PostScript name (e.g. "MonoLisa") —
+        // when two TTFs export the same PostScript name, NSFont(name:) returns
+        // whichever was registered first, often the italic file.
+        if name.caseInsensitiveCompare(family) == .orderedSame { return nil }
+        return Member(name: name, weight: w, traits: t)
+    }
+    let wantItalic = traits.contains(.italicFontMask)
+    let wantBold = traits.contains(.boldFontMask)
+    let italicMask: UInt = 1
+    let boldMask: UInt = 2
+    let matchingItalic = parsed.filter { (($0.traits & italicMask) != 0) == wantItalic }
+    let pool = matchingItalic.isEmpty ? parsed : matchingItalic
+    let boldFiltered = pool.filter { (($0.traits & boldMask) != 0) == wantBold }
+    let finalPool = boldFiltered.isEmpty ? pool : boldFiltered
+    let best = finalPool.min { abs($0.weight - weight) < abs($1.weight - weight) }
+    guard let pick = best else { return nil }
+    return NSFont(name: pick.name, size: size)
+}
+
 private func hex(_ s: String?, fallback: NSColor) -> NSColor {
     guard let s = s else { return fallback }
     var v = s
@@ -147,13 +224,19 @@ final class BarWindow: NSPanel {
     let view: BarView
     weak var screenRef: NSScreen?
     weak var controller: BarController?
-    static let height: CGFloat = 28
+    static let defaultHeight: CGFloat = 28
+
+    static func height(for cfg: I3Config) -> CGFloat {
+        let f = barFont(for: cfg)
+        return max(defaultHeight, ceil(f.ascender - f.descender + f.leading) + 10)
+    }
 
     init(screen: NSScreen, controller: BarController) {
         let visible = screen.visibleFrame
         let atBottom = controller.config.bar.position == "bottom"
-        let barY = atBottom ? visible.minY : visible.maxY - BarWindow.height
-        let barFrame = NSRect(x: visible.minX, y: barY, width: visible.width, height: BarWindow.height)
+        let h = BarWindow.height(for: controller.config)
+        let barY = atBottom ? visible.minY : visible.maxY - h
+        let barFrame = NSRect(x: visible.minX, y: barY, width: visible.width, height: h)
         self.view = BarView(frame: NSRect(origin: .zero, size: barFrame.size))
         self.screenRef = screen
         self.controller = controller
@@ -207,8 +290,7 @@ final class BarView: NSView {
         let y: CGFloat = 0
         let h = bounds.height
 
-        let fontSize: CGFloat = 13
-        let font = NSFont(name: "JetBrainsMono Nerd Font", size: fontSize) ?? NSFont.menuFont(ofSize: fontSize)
+        let font = barFont(for: cfg)
 
         let curWS = mgr?.ledger.current
         let activePerOutput: Set<ObjectIdentifier> = Set((mgr?.outputs ?? []).compactMap { $0.activeWorkspace.map { ObjectIdentifier($0) } })

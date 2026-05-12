@@ -33,6 +33,7 @@ struct BarConfig {
     var workspaceMinWidth: Int = 0
     var trayPadding: Int = 0
     var position: String = "top"
+    var font: String?
     var colors: BarColors = BarColors()
 }
 
@@ -249,6 +250,8 @@ private final class I3ConfigParser {
                 cfg.bar.trayPadding = Int(toks.dropFirst().first ?? "0") ?? 0
             case "position":
                 cfg.bar.position = toks.count > 1 ? toks[1] : "top"
+            case "font":
+                cfg.bar.font = extractAfter(substituted, prefix: "font").trimmingCharacters(in: .whitespaces)
             case "colors":
                 try handleBarColorsBlock(into: &cfg)
             default: break
