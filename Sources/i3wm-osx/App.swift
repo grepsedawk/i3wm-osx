@@ -9,6 +9,7 @@ final class I3App {
     let hotkeys: HotkeyManager
     let ipc: IPCServer
     let bar: BarController
+    let ssid = SSIDProvider()
 
     init(configPath: String, restoreStatePath: String? = nil) {
         self.configPath = configPath
@@ -63,6 +64,7 @@ final class I3App {
         Logger.info("bar windows: \(bar.windows.count)")
         ipc.bind(commandHandler: { [weak self] cmd in self?.run(commandText: cmd) ?? "[]" }, manager: manager, config: { [weak self] in self?.config ?? I3Config() })
         ipc.start()
+        ssid.start()
         // On restart, once-only `exec` directives already ran in the prior
         // instance; only `exec_always` (once=false) re-fires.
         if restoreStatePath == nil {

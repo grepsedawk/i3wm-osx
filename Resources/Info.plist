@@ -32,5 +32,9 @@
     <string>i3wm-osx needs Apple Events to launch applications and run commands defined in your i3 config.</string>
     <key>NSAccessibilityUsageDescription</key>
     <string>i3wm-osx needs Accessibility access to move and resize windows like i3wm.</string>
+    <key>NSLocationUsageDescription</key>
+    <string>i3wm-osx reads the current Wi-Fi SSID for the status bar. macOS redacts the SSID from non-privileged apps unless Location access is granted.</string>
+    <key>NSLocationWhenInUseUsageDescription</key>
+    <string>i3wm-osx reads the current Wi-Fi SSID for the status bar. macOS redacts the SSID from non-privileged apps unless Location access is granted.</string>
 </dict>
 </plist>
