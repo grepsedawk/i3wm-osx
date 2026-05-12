@@ -50,7 +50,6 @@ What doesn't work yet:
 - Stacking layout titlebars are minimal
 - Window borders (we set `default_border none`, which matches the target config)
 - `move scratchpad`, `sticky`, `urgent` hint
-- Spaces (macOS Spaces) integration — windows are placed on the current macOS Space; we don't move them across Spaces
 
 ## Manual build
 
