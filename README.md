@@ -51,7 +51,6 @@ What doesn't work yet:
 - Window borders (we set `default_border none`, which matches the target config)
 - `move scratchpad`, `sticky`, `urgent` hint
 - Spaces (macOS Spaces) integration — windows are placed on the current macOS Space; we don't move them across Spaces
-- `restart` does not preserve in-place state; it re-execs from scratch
 
 ## Manual build
 
