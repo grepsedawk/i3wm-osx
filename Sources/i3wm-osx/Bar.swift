@@ -48,7 +48,7 @@ func barFont(for cfg: I3Config) -> NSFont {
         }
         if let nf = NSFont(name: f, size: p.size) { return nf }
     }
-    return NSFont(name: "JetBrainsMono Nerd Font", size: p.size) ?? NSFont.menuFont(ofSize: p.size)
+    return NSFont.monospacedSystemFont(ofSize: p.size, weight: .regular)
 }
 
 private func resolveFamilyMember(family: String, traits: NSFontTraitMask, weight: Int, size: CGFloat) -> NSFont? {
