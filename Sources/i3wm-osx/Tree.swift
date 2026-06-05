@@ -73,6 +73,16 @@ final class Container {
     var isLeaf: Bool { children.isEmpty }
 
     func add(_ child: Container, at index: Int? = nil) {
+        // A reparent that drops a node inside its own subtree makes the tree
+        // cyclic, and every walk (collectWindows, layout, focus) then recurses
+        // until the stack overflows. Refuse it and leave the child where it is:
+        // a misplaced window is recoverable, a crash is not. (Safety net — if
+        // this ever fires, the directionalMove/collapse logic that asked for the
+        // cyclic move is the real bug to chase.)
+        if child === self || isDescendant(of: child) {
+            Logger.warn("tree: refused cyclic add of con \(child.id) into con \(id)")
+            return
+        }
         if let p = child.parent { p.remove(child) }
         child.parent = self
         if let i = index, i >= 0, i <= children.count {
@@ -127,6 +137,15 @@ final class Container {
         focusOrder.removeAll { $0 == child.id }
         focusOrder.append(child.id)
         parent?.bumpFocus(self)
+    }
+
+    func isDescendant(of other: Container) -> Bool {
+        var p = parent
+        while let cur = p {
+            if cur === other { return true }
+            p = cur.parent
+        }
+        return false
     }
 
     func collectWindows() -> [ManagedWindow] {

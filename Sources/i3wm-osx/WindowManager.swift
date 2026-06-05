@@ -110,12 +110,14 @@ final class WindowManager {
     func adopt(element: AXUIElement, pid: pid_t, id: CGWindowID) -> ManagedWindow? {
         guard id != 0 else { return nil }
         if let existing = windowsByID[id] { return existing }
-        let appName = NSRunningApplication(processIdentifier: pid)?.localizedName ?? ""
+        let runningApp = NSRunningApplication(processIdentifier: pid)
+        let appName = runningApp?.localizedName ?? ""
+        let bundleID = runningApp?.bundleIdentifier
         let title = AX.title(element) ?? ""
         let subrole = AX.subrole(element) ?? "?"
         let size = AX.size(element) ?? .zero
         Logger.info("adopt: [\(appName)] \(title.isEmpty ? "<untitled>" : title) (id=\(id), subrole=\(subrole), size=\(Int(size.width))×\(Int(size.height)))")
-        let mw = ManagedWindow(element: element, pid: pid, id: id, appName: appName, title: title)
+        let mw = ManagedWindow(element: element, pid: pid, id: id, appName: appName, title: title, bundleID: bundleID)
         if let frame = AX.frame(element) { mw.lastKnownFrame = frame }
         windowsByID[id] = mw
         if shouldFloat(window: mw) {
@@ -134,7 +136,31 @@ final class WindowManager {
         focused = leaf
         ws.tree.bumpFocus(leaf)
         observe(pid: pid, element: element)
+        if mw.hasGeometryQuirk { scheduleGeometrySettle(id: id) }
         return mw
+    }
+
+    // Gecko (Firefox/Zen) re-applies its own remembered geometry once, shortly
+    // after a window opens — XULStore at window creation plus SessionStore on a
+    // zero-delay timer that fires after chrome loads — landing AFTER our first
+    // tile and knocking the window out of place. Counter it with exactly ONE
+    // re-tile after that restore lands. Strictly one-shot per window open; NOT
+    // wired into the move/resize observer — a reactive loop there fought Gecko's
+    // own tab/devtools animations last time and made things jitter worse.
+    private func scheduleGeometrySettle(id: CGWindowID) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+            guard let self,
+                  let mw = self.windowsByID[id], mw.hasGeometryQuirk,
+                  !mw.isFloating, !mw.hiddenByUs,
+                  self.containerByWindowID[id] != nil else { return }
+            // Re-run the whole layout instead of stamping this window's cached
+            // c.rect: a focus/tab switch since adopt can leave that rect stale or
+            // mark the window an inactive (parked) tab, and applyAllLayouts re-tiles
+            // or re-parks it correctly and handles a fullscreen sibling. The
+            // hasGeometryQuirk re-check guards a recycled CGWindowID that now maps
+            // to an unrelated window.
+            self.applyAllLayouts()
+        }
     }
 
     func release(id: CGWindowID) {
@@ -494,6 +520,11 @@ final class WindowManager {
                         mgr.bar?.refresh()
                     }
                 } else if n == kAXMovedNotification as String || n == kAXResizedNotification as String {
+                    // INVARIANT: this branch must stay a no-op for visible tiled
+                    // windows (reassertHideIfDrifted only re-parks offscreen-hidden
+                    // ones). Our own apply() emits moved/resized, so any tile-reassert
+                    // added here would feed back on itself — and would turn the Gecko
+                    // one-shot settle in scheduleGeometrySettle into a jitter loop.
                     if let id = AX.windowID(elem) { mgr.reassertHideIfDrifted(id: id) }
                 }
             }
@@ -555,9 +586,32 @@ final class WindowManager {
     /// frequency, user-initiated, catches anything that drifted into
     /// unmanageable since the last switch.
     private func sweepPhantoms() {
-        for w in Array(windowsByID.values) where !WindowDiscovery.isManageable(w.element) {
-            Logger.info("sweep phantom: [\(w.appName)] \(w.title.isEmpty ? "<untitled>" : w.title) (id=\(w.id))")
-            release(id: w.id)
+        // Skip windows we hid ourselves: a hidden window (app-hidden via ⌘H, or
+        // parked offscreen) legitimately reports 0×0 / no subrole and would fail
+        // isManageable — releasing it here permanently drops a live window we
+        // own. Gecko/Zen collapses hard when app-hidden, so moving it to another
+        // workspace then switching used to sweep it out of management entirely.
+        // A real phantom mutates while VISIBLE; truly-closed windows are caught
+        // by the destroyed-notification instead.
+        // This runs at the TOP of switchWorkspace, before the switch hides/settles
+        // windows. Gecko collapses its frame for a split second mid-switch, so a
+        // VISIBLE Zen window can momentarily fail isManageable here and get released
+        // — then never re-adopted (nothing re-scans a released window), leaving it
+        // orphaned and floating. So don't release on the transient: re-verify after
+        // things settle and only release if it's STILL unmanageable, still ours, and
+        // not simply hidden-by-us by now. A genuinely closed/phantom window stays
+        // unmanageable; a live one recovers or becomes hiddenByUs.
+        for w in Array(windowsByID.values) where !w.hiddenByUs && !WindowDiscovery.isManageable(w.element) {
+            let id = w.id
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.5) { [weak self] in
+                guard let self,
+                      let w = self.windowsByID[id], !w.hiddenByUs,
+                      !WindowDiscovery.isManageable(w.element) else { return }
+                let alive = AX.windowID(w.element) != nil
+                let sz = AX.size(w.element).map { "\(Int($0.width))×\(Int($0.height))" } ?? "nil"
+                Logger.info("sweep phantom (confirmed): [\(w.appName)] \(w.title.isEmpty ? "<untitled>" : w.title) (id=\(id)) — size=\(sz) alive=\(alive)")
+                self.release(id: id)
+            }
         }
     }
 

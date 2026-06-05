@@ -3,9 +3,21 @@ import ApplicationServices
 import Foundation
 
 final class ManagedWindow {
+    // Gecko (Firefox/Zen) re-asserts its own remembered window geometry once,
+    // shortly after a window opens — so a one-shot re-tile is scheduled for
+    // these. Keyed by bundle id since localized app names vary.
+    static let geometryQuirkBundleIDs: Set<String> = [
+        "org.mozilla.firefox",
+        "org.mozilla.firefoxdeveloperedition",
+        "org.mozilla.nightly",
+        "app.zen-browser.zen",
+        "app.zen-browser.zen-twilight",
+    ]
+
     let element: AXUIElement
     let pid: pid_t
     let id: CGWindowID
+    let bundleID: String?
     var appName: String
     var title: String
     var lastKnownFrame: CGRect = .zero
@@ -15,12 +27,18 @@ final class ManagedWindow {
     var minimizedByUs: Bool = false
     var hiddenByUs: Bool = false
 
-    init(element: AXUIElement, pid: pid_t, id: CGWindowID, appName: String, title: String) {
+    var hasGeometryQuirk: Bool {
+        guard let bundleID else { return false }
+        return ManagedWindow.geometryQuirkBundleIDs.contains(bundleID)
+    }
+
+    init(element: AXUIElement, pid: pid_t, id: CGWindowID, appName: String, title: String, bundleID: String?) {
         self.element = element
         self.pid = pid
         self.id = id
         self.appName = appName
         self.title = title
+        self.bundleID = bundleID
     }
 
     func refreshTitle() {
@@ -57,9 +75,18 @@ enum WindowDiscovery {
             let appElem = AXUIElementCreateApplication(app.processIdentifier)
             guard let windows: [AXUIElement] = AX.attribute(appElem, kAXWindowsAttribute) else { continue }
             for w in windows {
-                guard isManageable(w) else { continue }
-                let id = AX.windowID(w) ?? 0
-                results.append((app.processIdentifier, w, id))
+                if isManageable(w) {
+                    let id = AX.windowID(w) ?? 0
+                    results.append((app.processIdentifier, w, id))
+                } else {
+                    // DIAGNOSTIC (temporary): why was a real-looking window not adopted
+                    // at scan? Logs the AX fields isManageable gates on so an orphan
+                    // (e.g. a Zen window stuck unmanaged) can be explained directly.
+                    let role = AX.role(w) ?? "nil"
+                    let sub = AX.subrole(w) ?? "nil"
+                    let szStr = AX.size(w).map { "\(Int($0.width))×\(Int($0.height))" } ?? "nil"
+                    Logger.info("scan reject: [\(app.localizedName ?? "?")] role=\(role) sub=\(sub) size=\(szStr) min=\(AX.isMinimized(w))")
+                }
             }
         }
         return results
