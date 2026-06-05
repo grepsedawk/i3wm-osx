@@ -104,6 +104,18 @@ final class BarController {
     var config: I3Config = I3Config()
     private var statusFeed: StatusFeed?
     private(set) var statusBlocks: [StatusBlock] = []
+    private var hidden = false
+
+    /// Hide the bar while an i3-fullscreen window is up so the window covers
+    /// its strip instead of a tile sliding under it. (Native macOS fullscreen
+    /// is handled by the bar not joining all Spaces — see BarWindow.init.)
+    func setHidden(_ hidden: Bool) {
+        guard hidden != self.hidden else { return }
+        self.hidden = hidden
+        for w in windows {
+            if hidden { w.orderOut(nil) } else { w.orderFront(nil) }
+        }
+    }
 
     func bind(config: I3Config, manager: WindowManager) {
         self.config = config
@@ -125,7 +137,7 @@ final class BarController {
         for screen in NSScreen.screens {
             let w = BarWindow(screen: screen, controller: self)
             windows.append(w)
-            w.orderFront(nil)
+            if !hidden { w.orderFront(nil) }
         }
         refresh()
     }
@@ -245,7 +257,12 @@ final class BarWindow: NSPanel {
         self.isMovable = false
         self.hidesOnDeactivate = false
         self.level = .statusBar
-        self.collectionBehavior = [.canJoinAllSpaces, .stationary, .ignoresCycle]
+        // Deliberately NOT .canJoinAllSpaces: that flag forces the bar onto
+        // every Space including the separate Space macOS creates for a
+        // native-fullscreen window, where it would float over the window's
+        // edge. Bound to its own Space, the bar stays on the i3 workspace
+        // (the only Space we ever use) and fullscreen windows cover it.
+        self.collectionBehavior = [.stationary, .ignoresCycle]
         self.backgroundColor = .clear
         self.hasShadow = false
         self.contentView = view

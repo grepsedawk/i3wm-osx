@@ -50,6 +50,10 @@ final class WindowManager {
     func bind(config: I3Config, bar: BarController) {
         self.config = config
         self.bar = bar
+        // The reserved strip must match the bar's actual rendered height, which
+        // grows with the configured font — a fixed inset leaves tall bars
+        // overlapping tiles (windows slide under the bar).
+        self.barInset = BarWindow.height(for: config)
     }
 
     func bootstrap(deferLayout: Bool = false) {
@@ -285,6 +289,7 @@ final class WindowManager {
     }
 
     func applyAllLayouts() {
+        bar?.setHidden(fullscreenWindow != nil)
         let ctx = LayoutContext(
             innerGap: config.innerGap,
             outerGap: config.outerGap,
