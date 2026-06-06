@@ -314,8 +314,18 @@ final class WindowManager {
         }
     }
 
+    /// True only when the fullscreen window is on a workspace that is actually
+    /// visible right now. A fullscreen window parked on a hidden workspace must
+    /// not blank the bar on the workspace the user is looking at.
+    private var fullscreenWindowVisible: Bool {
+        guard let fsID = fullscreenWindow,
+              let c = containerByWindowID[fsID],
+              let ws = workspaceContaining(c) else { return false }
+        return outputs.contains { $0.activeWorkspace === ws }
+    }
+
     func applyAllLayouts() {
-        bar?.setHidden(fullscreenWindow != nil)
+        bar?.setHidden(fullscreenWindowVisible)
         let ctx = LayoutContext(
             innerGap: config.innerGap,
             outerGap: config.outerGap,
