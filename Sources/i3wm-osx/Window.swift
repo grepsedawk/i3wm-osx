@@ -27,6 +27,12 @@ final class ManagedWindow {
     var minimizedByUs: Bool = false
     var hiddenByUs: Bool = false
 
+    // Stamped whenever the WM itself moves the window. Mouse-driven snap-back
+    // ignores AX moved/resized events inside this window so our own apply() —
+    // and an app's immediate min-size bounce-back to it — don't feed back.
+    var suppressSnapBackUntil: TimeInterval = 0
+    static let snapBackSuppression: TimeInterval = 0.4
+
     var hasGeometryQuirk: Bool {
         guard let bundleID else { return false }
         return ManagedWindow.geometryQuirkBundleIDs.contains(bundleID)
@@ -48,6 +54,7 @@ final class ManagedWindow {
     @discardableResult
     func apply(frame: CGRect) -> Bool {
         lastKnownFrame = frame
+        suppressSnapBackUntil = Date().timeIntervalSince1970 + Self.snapBackSuppression
         return AX.setFrame(element, frame)
     }
 

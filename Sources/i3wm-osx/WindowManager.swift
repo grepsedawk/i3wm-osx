@@ -45,6 +45,12 @@ final class WindowManager {
     private var intentFocusAt: TimeInterval = 0
     private static let intentFocusGracePeriod: TimeInterval = 0.4
 
+    /// Per-window debounce for mouse-driven snap-back. A drag emits a stream of
+    /// moved/resized events; we re-tile once, after it quiesces.
+    private var snapBackWork: [CGWindowID: DispatchWorkItem] = [:]
+    private static let snapBackDebounce: TimeInterval = 0.2
+    private static let snapBackTolerance: CGFloat = 4
+
     var modeStack: [String] = []
 
     func bind(config: I3Config, bar: BarController) {
@@ -166,6 +172,7 @@ final class WindowManager {
     func release(id: CGWindowID) {
         guard let mw = windowsByID.removeValue(forKey: id) else { return }
         Logger.info("release: [\(mw.appName)] \(mw.title.isEmpty ? "<untitled>" : mw.title) (id=\(id))")
+        snapBackWork.removeValue(forKey: id)?.cancel()
         floatingWindows.remove(id)
         if fullscreenWindow == id { fullscreenWindow = nil }
         if let c = containerByWindowID.removeValue(forKey: id) {
@@ -530,12 +537,10 @@ final class WindowManager {
                         mgr.bar?.refresh()
                     }
                 } else if n == kAXMovedNotification as String || n == kAXResizedNotification as String {
-                    // INVARIANT: this branch must stay a no-op for visible tiled
-                    // windows (reassertHideIfDrifted only re-parks offscreen-hidden
-                    // ones). Our own apply() emits moved/resized, so any tile-reassert
-                    // added here would feed back on itself — and would turn the Gecko
-                    // one-shot settle in scheduleGeometrySettle into a jitter loop.
-                    if let id = AX.windowID(elem) { mgr.reassertHideIfDrifted(id: id) }
+                    if let id = AX.windowID(elem) {
+                        mgr.reassertHideIfDrifted(id: id)
+                        mgr.snapBackIfDrifted(id: id)
+                    }
                 }
             }
         }
@@ -637,6 +642,44 @@ final class WindowManager {
         if visibleWorkspaceIDs().contains(ObjectIdentifier(ws)) { return }
         if isOffscreenHidden(mw) { return }
         parkOffscreen(mw)
+    }
+
+    /// i3 won't let you mouse-move or -resize a tiled window. macOS can't block
+    /// the drag, so we snap the window back to its computed slot once the drag
+    /// settles. Three things would otherwise feed back, all defused by
+    /// suppressSnapBackUntil (stamped in apply()) plus the debounce:
+    ///   - our own apply() emits moved/resized → inside the suppression window
+    ///   - an app refusing a min-size and bouncing back → same, within suppression
+    ///   - Gecko's tab/devtools resize animation → the debounce collapses the
+    ///     stream to one snap after it stops, instead of fighting each frame
+    func snapBackIfDrifted(id: CGWindowID) {
+        guard let mw = windowsByID[id], !mw.isFloating, !mw.hiddenByUs,
+              fullscreenWindow != id,
+              let c = containerByWindowID[id], let ws = workspaceContaining(c),
+              visibleWorkspaceIDs().contains(ObjectIdentifier(ws)),
+              c.rect.width > 1, c.rect.height > 1 else { return }
+        if Date().timeIntervalSince1970 < mw.suppressSnapBackUntil { return }
+        guard let actual = AX.frame(mw.element), drifted(actual, from: c.rect) else { return }
+
+        snapBackWork[id]?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            guard let self else { return }
+            self.snapBackWork[id] = nil
+            guard let mw = self.windowsByID[id], !mw.isFloating, !mw.hiddenByUs,
+                  self.fullscreenWindow != id,
+                  let c = self.containerByWindowID[id],
+                  c.rect.width > 1, c.rect.height > 1,
+                  let actual = AX.frame(mw.element), self.drifted(actual, from: c.rect) else { return }
+            mw.apply(frame: c.rect)
+        }
+        snapBackWork[id] = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.snapBackDebounce, execute: work)
+    }
+
+    private func drifted(_ a: CGRect, from b: CGRect) -> Bool {
+        let t = Self.snapBackTolerance
+        return abs(a.origin.x - b.origin.x) > t || abs(a.origin.y - b.origin.y) > t
+            || abs(a.width - b.width) > t || abs(a.height - b.height) > t
     }
 
     private func hideWindow(_ mw: ManagedWindow) {
