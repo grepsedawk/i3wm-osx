@@ -26,15 +26,6 @@ final class WindowManager {
     /// focus-follow to chase its tail.
     var pendingOurHides: [pid_t: Int] = [:]
 
-    /// Wallclock of the last `switchWorkspace`. Used to suppress
-    /// focus-follow chases for a brief grace period — when we hide an
-    /// inactive workspace's windows via `setAppHidden`, those apps fire
-    /// `kAXFocusedWindowChangedNotification` for their *internal* focused
-    /// window. Without this, the WM chases the notification right back
-    /// to the workspace we just left and the user sees the screen ping-pong.
-    private var lastWorkspaceSwitchAt: TimeInterval = 0
-    private static let focusFollowGracePeriod: TimeInterval = 0.35
-
     /// What we last asked AX to focus, and when. Apps with multi-window UIs
     /// (Brave is the canonical offender) re-activate their *own*
     /// last-known-focused window during `NSRunningApplication.activate`,
@@ -416,35 +407,65 @@ final class WindowManager {
     }
 
     /// Called when an external focus event happens (app activation, AX
-    /// focused-window-changed). If the now-focused window belongs to a
-    /// non-active workspace, jump to that workspace.
-    func handleExternalFocus(windowID id: CGWindowID) {
-        guard let c = containerByWindowID[id] else { return }
-        guard let target = workspaceContaining(c) else { return }
-        if ledger.current === target {
+    /// focused-window-changed). If the now-focused window belongs to a hidden
+    /// workspace, jump to it. A window on another display is already visible,
+    /// so focusing it must not replace either display's active workspace.
+    func handleExternalFocus(
+        windowID id: CGWindowID,
+        source: ExternalFocusSource = .focusedWindowNotification
+    ) {
+        guard let win = windowsByID[id], let c = containerByWindowID[id] else { return }
+        guard let target = workspaceContaining(c), let targetOutput = target.output else { return }
+        let now = Date().timeIntervalSince1970
+        let decision = FocusTransitionPolicy.decideExternalFocus(
+            event: SystemFocusSnapshot(pid: win.pid, windowID: win.id),
+            system: currentSystemFocus(),
+            targetWorkspaceName: target.name,
+            targetOutputID: targetOutput.id,
+            activeWorkspaceByOutputID: Dictionary(
+                uniqueKeysWithValues: outputs.compactMap { out in
+                    out.activeWorkspace.map { (out.id, $0.name) }
+                }
+            ),
+            source: source,
+            targetIsHiddenOffscreen: win.hiddenByUs && isOffscreenHidden(win)
+        )
+        switch decision {
+        case .ignore:
+            return
+        case .focusVisibleWorkspace:
+            if ledger.current !== target { pendingSplit = .none }
+            ledger.setCurrent(target)
             focused = c
             c.parent?.bumpFocus(c)
             bar?.refresh()
             return
+        case .switchWorkspace:
+            // App activation can briefly focus a sibling window before the
+            // window we explicitly requested. Do not follow that sibling to a
+            // hidden workspace.
+            if let intent = intentFocusID, intent != id,
+               now - intentFocusAt < Self.intentFocusGracePeriod {
+                return
+            }
+            // hiddenByUs + on-screen means the app undid our soft hide, so the
+            // current system focus is genuine and focus-follow should reveal it.
+            if win.hiddenByUs {
+                CGS.setAlpha(win.id, 1)
+                win.hiddenByUs = false
+            }
+            Logger.info("focus-follow: \(describe(c)) is on ws \(target.name) — switching")
+            switchWorkspace(name: target.name)
         }
-        // Side-effect from our own intentFocus: app activation pulled a
-        // sibling forward. Don't chase it onto another workspace.
-        if let intent = intentFocusID, intent != id,
-           Date().timeIntervalSince1970 - intentFocusAt < Self.intentFocusGracePeriod {
-            return
-        }
-        // hiddenByUs + still-offscreen = bookkeeping event from macOS
-        // reshuffling a hidden app's internal focus; ignore. hiddenByUs +
-        // on-screen = the app un-did our soft hide (alpha+offscreen), so
-        // the window is now genuinely visible — clear the flag and follow.
-        if let win = c.window, win.hiddenByUs {
-            if isOffscreenHidden(win) { return }
-            CGS.setAlpha(win.id, 1)
-            win.hiddenByUs = false
-        }
-        if Date().timeIntervalSince1970 - lastWorkspaceSwitchAt < Self.focusFollowGracePeriod { return }
-        Logger.info("focus-follow: \(describe(c)) is on ws \(target.name) — switching")
-        switchWorkspace(name: target.name)
+    }
+
+    private func currentSystemFocus() -> SystemFocusSnapshot? {
+        guard let app = NSWorkspace.shared.frontmostApplication else { return nil }
+        let pid = app.processIdentifier
+        let appElem = AXUIElementCreateApplication(pid)
+        guard let focusedWindow: AXUIElement = AX.attribute(appElem, kAXFocusedWindowAttribute),
+              let focusedID = AX.windowID(focusedWindow) else { return nil }
+        return SystemFocusSnapshot(pid: pid, windowID: focusedID)
     }
 
     func handleAppActivated(_ app: NSRunningApplication) {
@@ -452,7 +473,7 @@ final class WindowManager {
         let appElem = AXUIElementCreateApplication(pid)
         guard let win: AXUIElement = AX.attribute(appElem, kAXFocusedWindowAttribute),
               let id = AX.windowID(win), id != 0 else { return }
-        handleExternalFocus(windowID: id)
+        handleExternalFocus(windowID: id, source: .applicationActivation)
     }
 
     func handleAppLaunched(_ app: NSRunningApplication) {
@@ -518,7 +539,7 @@ final class WindowManager {
                     }
                 } else if n == kAXFocusedWindowChangedNotification as String {
                     if let id = AX.windowID(elem) {
-                        mgr.handleExternalFocus(windowID: id)
+                        mgr.handleExternalFocus(windowID: id, source: .focusedWindowNotification)
                     }
                 } else if n == kAXApplicationHiddenNotification as String {
                     var p: pid_t = 0
@@ -765,15 +786,7 @@ final class WindowManager {
         let appElem = AXUIElementCreateApplication(pid)
         guard let win: AXUIElement = AX.attribute(appElem, kAXFocusedWindowAttribute),
               let id = AX.windowID(win), id != 0 else { return }
-        guard let c = containerByWindowID[id], let target = workspaceContaining(c) else { return }
-        // AX-focused window still parked offscreen → bookkeeping noise from
-        // our own showWindow on a sibling of this app, not a real reveal.
-        if let mw = windowsByID[id], mw.hiddenByUs, isOffscreenHidden(mw) { return }
-        // Target workspace already visible → our own showWindow during a
-        // workspace switch (target re-focused before this notification drained).
-        if visibleWorkspaceIDs().contains(ObjectIdentifier(target)) { return }
-        Logger.info("app shown externally: \(describe(c)) is on ws \(target.name) — switching")
-        switchWorkspace(name: target.name)
+        handleExternalFocus(windowID: id, source: .applicationShown)
     }
 
     func syncFocusFromSystem() {
@@ -788,7 +801,13 @@ final class WindowManager {
             // window. Trusting that would point `focused` at a container
             // the user can't see, so subsequent move/kill act on the wrong
             // window.
-            if let ws = workspaceContaining(c), ledger.current !== ws { return }
+            if let ws = workspaceContaining(c) {
+                guard visibleWorkspaceIDs().contains(ObjectIdentifier(ws)) else { return }
+                if ledger.current !== ws {
+                    pendingSplit = .none
+                    ledger.setCurrent(ws)
+                }
+            }
             if focused !== c {
                 Logger.debug("sync focus: \(describe(focused)) → \(describe(c))")
                 focused = c
@@ -920,18 +939,29 @@ final class WindowManager {
             Logger.info("workspace: auto_back_and_forth → \(prev.name)")
             return switchWorkspace(name: prev.name)
         }
-        let previous = ledger.current
-        if previous?.name == ws.name { return }
-        lastWorkspaceSwitchAt = Date().timeIntervalSince1970
+        guard let out = ws.output else { return }
+        let previous = out.activeWorkspace
+        if previous === ws {
+            pendingSplit = .none
+            ledger.setCurrent(ws)
+            let leaf = ws.tree.deepestFocusedLeaf()
+            if let firstWin = leaf.window {
+                focused = leaf
+                intentFocus(firstWin)
+                if config.mouseFollowsFocus { warpMouseToFocus(leaf) }
+            } else {
+                focused = ws.tree
+            }
+            bar?.refresh()
+            return
+        }
         // pendingSplit is a one-shot scoped to "next window in this workspace
         // and moment" — leaving it set across a switch makes a stale split
         // intent get applied to an unrelated future window.
         pendingSplit = .none
         let nWindows = ws.tree.collectWindows().count
         Logger.info("workspace: \(previous?.name ?? "?") → \(ws.name) (\(nWindows) window\(nWindows == 1 ? "" : "s"))")
-        if let out = ws.output {
-            out.activeWorkspace = ws
-        }
+        out.activeWorkspace = ws
         ledger.setCurrent(ws)
         // Restore windows on the workspace we're showing. Order matters:
         // first re-tile (positions them correctly), then make them visible —
@@ -947,8 +977,13 @@ final class WindowManager {
         }
         // Hide windows we're leaving behind (skip ones the user minimized
         // themselves so they stay minimized when we come back).
-        for w in (previous?.tree.collectWindows() ?? []) where !AX.isMinimized(w.element) {
-            hideWindow(w)
+        let previousRemainsVisible = previous.map { displaced in
+            outputs.contains { $0 !== out && $0.activeWorkspace === displaced }
+        } ?? false
+        if !previousRemainsVisible {
+            for w in (previous?.tree.collectWindows() ?? []) where !AX.isMinimized(w.element) {
+                hideWindow(w)
+            }
         }
         let leaf = ws.tree.deepestFocusedLeaf()
         if let firstWin = leaf.window {

@@ -59,12 +59,15 @@ final class ManagedWindow {
     }
 
     func focus() {
-        AX.raise(element)
-        AX.setMain(element)
-        AX.setFocused(element)
         if let app = NSRunningApplication(processIdentifier: pid) {
             app.activate(options: [])
         }
+        // Multi-window apps restore their own last-focused sibling when
+        // activated. Apply our window choice afterward so that sibling cannot
+        // steal focus back from a window on another workspace.
+        AX.raise(element)
+        AX.setMain(element)
+        AX.setFocused(element)
     }
 
     func close() {

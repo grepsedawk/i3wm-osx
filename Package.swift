@@ -22,5 +22,10 @@ let package = Package(
             name: "i3-msg",
             path: "Sources/i3-msg"
         ),
+        .testTarget(
+            name: "i3wm-osxTests",
+            dependencies: ["i3wm-osx"],
+            path: "Tests/i3wm-osxTests"
+        ),
     ]
 )
