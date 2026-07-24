@@ -60,8 +60,32 @@ let restoreStatePath: String? = {
     return nil
 }()
 
+let inheritedLockFileDescriptor: Int32? = {
+    guard
+        let i = args.firstIndex(of: "--instance-lock-fd"),
+        i + 1 < args.count
+    else {
+        return nil
+    }
+    return Int32(args[i + 1])
+}()
+
+let instanceLock: SingleInstanceLock
+do {
+    instanceLock = try SingleInstanceLock.acquire(inheriting: inheritedLockFileDescriptor)
+} catch {
+    FileHandle.standardError.write(Data("i3wm-osx: \(error)\n".utf8))
+    exit(1)
+}
+
 let app = NSApplication.shared
 app.setActivationPolicy(.accessory)
-let coordinator = I3App(configPath: configPath, restoreStatePath: restoreStatePath)
+let coordinator = I3App(
+    configPath: configPath,
+    restoreStatePath: restoreStatePath,
+    instanceLock: instanceLock
+)
 coordinator.start()
-app.run()
+withExtendedLifetime(instanceLock) {
+    app.run()
+}

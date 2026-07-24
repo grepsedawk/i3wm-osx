@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 import CoreGraphics
 
@@ -299,32 +300,48 @@ enum CommandExecutor {
         // restart fires (e.g. atomic .app replacement during an update).
         let binary = Bundle.main.executablePath ?? ProcessInfo.processInfo.arguments[0]
 
-        var newArgs = Array(ProcessInfo.processInfo.arguments.dropFirst())
-        var i = 0
-        while i < newArgs.count {
-            if newArgs[i] == "--restore-state" {
-                let drop = min(2, newArgs.count - i)
-                newArgs.removeSubrange(i..<i + drop)
-            } else {
-                i += 1
+        let snap = RestartState.capture(app.manager)
+        let restoreStatePath = RestartState.write(snap)
+        if let restoreStatePath {
+            Logger.info("restart: snapshot at \(restoreStatePath) (\(snap.workspaces.count) workspaces, \(snap.windowState.count) windows)")
+        }
+        let newArgs = restartArguments(
+            currentArguments: ProcessInfo.processInfo.arguments,
+            restoreStatePath: restoreStatePath,
+            inheritedLockFileDescriptor: app.instanceLock.fileDescriptor
+        )
+
+        do {
+            try app.instanceLock.prepareForExec()
+        } catch {
+            Logger.warn("restart: \(error)")
+            if let restoreStatePath {
+                try? FileManager.default.removeItem(atPath: restoreStatePath)
+            }
+            return
+        }
+
+        app.bar.stopStatusFeed()
+
+        var argv: [UnsafeMutablePointer<CChar>?] = ([binary] + newArgs).map { strdup($0) }
+        argv.append(nil)
+        defer {
+            app.instanceLock.cancelExec()
+            app.bar.bind(config: app.config, manager: app.manager)
+            for case let pointer? in argv {
+                free(pointer)
             }
         }
 
-        let snap = RestartState.capture(app.manager)
-        if let path = RestartState.write(snap) {
-            newArgs.append(contentsOf: ["--restore-state", path])
-            Logger.info("restart: snapshot at \(path) (\(snap.workspaces.count) workspaces, \(snap.windowState.count) windows)")
+        let result = argv.withUnsafeMutableBufferPointer { buffer in
+            Darwin.execv(binary, buffer.baseAddress)
+        }
+        if result == -1 {
+            Logger.warn("restart: exec failed: \(String(cString: strerror(errno)))")
         }
 
-        let task = Process()
-        task.launchPath = binary
-        task.arguments = newArgs
-        do {
-            try task.run()
-        } catch {
-            Logger.warn("restart: launch failed: \(error)")
-            return
+        if let restoreStatePath {
+            try? FileManager.default.removeItem(atPath: restoreStatePath)
         }
-        NSApplication.shared.terminate(nil)
     }
 }

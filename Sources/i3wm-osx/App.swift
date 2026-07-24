@@ -1,4 +1,5 @@
 import AppKit
+import Darwin
 import Foundation
 
 final class I3App {
@@ -10,10 +11,16 @@ final class I3App {
     let ipc: IPCServer
     let bar: BarController
     let ssid = SSIDProvider()
+    let instanceLock: SingleInstanceLock
 
-    init(configPath: String, restoreStatePath: String? = nil) {
+    init(
+        configPath: String,
+        restoreStatePath: String? = nil,
+        instanceLock: SingleInstanceLock
+    ) {
         self.configPath = configPath
         self.restoreStatePath = restoreStatePath
+        self.instanceLock = instanceLock
         self.manager = WindowManager()
         self.hotkeys = HotkeyManager()
         self.ipc = IPCServer()
@@ -185,6 +192,12 @@ enum Logger {
         }
         let h = FileHandle(forWritingAtPath: path)
         try? h?.seekToEnd()
+        if let h {
+            let flags = fcntl(h.fileDescriptor, F_GETFD)
+            if flags >= 0 {
+                _ = fcntl(h.fileDescriptor, F_SETFD, flags | FD_CLOEXEC)
+            }
+        }
         return h
     }()
 

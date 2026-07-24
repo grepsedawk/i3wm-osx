@@ -158,6 +158,33 @@ enum RestartState {
     }
 }
 
+func restartArguments(
+    currentArguments: [String],
+    restoreStatePath: String?,
+    inheritedLockFileDescriptor: Int32
+) -> [String] {
+    var arguments = Array(currentArguments.dropFirst())
+    var index = 0
+    let replacedOptions = Set(["--restore-state", "--instance-lock-fd"])
+
+    while index < arguments.count {
+        if replacedOptions.contains(arguments[index]) {
+            arguments.removeSubrange(index..<min(index + 2, arguments.count))
+        } else {
+            index += 1
+        }
+    }
+
+    if let restoreStatePath {
+        arguments.append(contentsOf: ["--restore-state", restoreStatePath])
+    }
+    arguments.append(contentsOf: [
+        "--instance-lock-fd",
+        String(inheritedLockFileDescriptor),
+    ])
+    return arguments
+}
+
 extension WindowManager {
     func applyRestoreSnapshot(_ snap: RestartSnapshot) {
         Container.nextID = max(Container.nextID, snap.nextContainerID)

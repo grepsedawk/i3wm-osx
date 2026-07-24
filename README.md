@@ -20,6 +20,10 @@ The signing identity is stable across releases, so Accessibility / Input
 Monitoring grants survive `brew upgrade`. First launch needs those permissions
 granted to the bundle — see [Permissions](#permissions).
 
+i3wm-osx allows one window-manager process per user. Starting it again exits
+with the PID of the running instance. The `restart` command replaces the
+current process in place, so launchd does not create an extra KeepAlive copy.
+
 > ⚠️ Apple Silicon only for now (`depends_on arch: :arm64`). Intel users
 > need the [manual build](#manual-build).
 >

@@ -132,6 +132,11 @@ final class BarController {
         rebuildWindows()
     }
 
+    func stopStatusFeed() {
+        statusFeed?.stop()
+        statusFeed = nil
+    }
+
     func handleScreensChanged() {
         rebuildWindows()
     }
@@ -413,7 +418,16 @@ final class StatusFeed {
     }
 
     func stop() {
-        process?.terminate()
+        if let process {
+            process.terminate()
+            for _ in 0..<50 where process.isRunning {
+                usleep(10_000)
+            }
+            if process.isRunning {
+                kill(process.processIdentifier, SIGKILL)
+                process.waitUntilExit()
+            }
+        }
         process = nil
         pipe?.fileHandleForReading.readabilityHandler = nil
         pipe = nil

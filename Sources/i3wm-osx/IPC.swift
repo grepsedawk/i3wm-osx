@@ -25,6 +25,10 @@ final class IPCServer {
         unlink(path)
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { Logger.warn("IPC socket() failed"); return }
+        guard setCloseOnExec(fd) else {
+            close(fd)
+            return
+        }
         var addr = sockaddr_un()
         addr.sun_family = sa_family_t(AF_UNIX)
         let pathBytes = path.utf8CString
@@ -58,11 +62,26 @@ final class IPCServer {
                     accept(self.listenerFD, sa, &clen)
                 }
             }
-            if cfd >= 0 { self.handleClient(cfd) }
+            if cfd >= 0 {
+                guard self.setCloseOnExec(cfd) else {
+                    close(cfd)
+                    return
+                }
+                self.handleClient(cfd)
+            }
         }
         src.resume()
         self.source = src
         Logger.info("IPC listening on \(path)")
+    }
+
+    private func setCloseOnExec(_ fd: Int32) -> Bool {
+        let flags = fcntl(fd, F_GETFD)
+        guard flags >= 0, fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0 else {
+            Logger.warn("IPC close-on-exec failed: \(String(cString: strerror(errno)))")
+            return false
+        }
+        return true
     }
 
     private func handleClient(_ fd: Int32) {
