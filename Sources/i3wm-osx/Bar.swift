@@ -1,4 +1,5 @@
 import AppKit
+import CoreFoundation
 import Foundation
 
 private struct PangoFont {
@@ -78,11 +79,11 @@ private func resolveFamilyMember(family: String, traits: NSFontTraitMask, weight
     return NSFont(name: pick.name, size: size)
 }
 
-private func hex(_ s: String?, fallback: NSColor) -> NSColor {
-    guard let s = s else { return fallback }
+private func parseHexColor(_ s: String?) -> NSColor? {
+    guard let s = s else { return nil }
     var v = s
     if v.hasPrefix("#") { v.removeFirst() }
-    guard let n = UInt32(v, radix: 16) else { return fallback }
+    guard v.count == 6 || v.count == 8, let n = UInt32(v, radix: 16) else { return nil }
     let r, g, b, a: CGFloat
     if v.count == 8 {
         r = CGFloat((n >> 24) & 0xff) / 255
@@ -96,6 +97,10 @@ private func hex(_ s: String?, fallback: NSColor) -> NSColor {
         a = 1.0
     }
     return NSColor(srgbRed: r, green: g, blue: b, alpha: a)
+}
+
+private func hex(_ s: String?, fallback: NSColor) -> NSColor {
+    parseHexColor(s) ?? fallback
 }
 
 final class BarController {
@@ -158,9 +163,220 @@ final class BarController {
     }
 }
 
-struct StatusBlock {
+struct StatusTextRun {
     var text: String
     var color: NSColor?
+}
+
+struct StatusBlock {
+    static let legacySeparatorPadding: CGFloat = 16
+
+    var text: String
+    var color: NSColor?
+    var markup: String?
+    var separator: Bool
+    var separatorBlockWidth: CGFloat?
+    private(set) var textRuns: [StatusTextRun]
+
+    init(
+        text: String,
+        color: NSColor?,
+        markup: String? = nil,
+        separator: Bool = true,
+        separatorBlockWidth: CGFloat? = nil
+    ) {
+        self.text = text
+        self.color = color
+        self.markup = markup
+        self.separator = separator
+        self.separatorBlockWidth = separatorBlockWidth
+        self.textRuns = markup == "pango"
+            ? PangoMarkupParser.parse(text) ?? [StatusTextRun(text: text, color: nil)]
+            : [StatusTextRun(text: text, color: nil)]
+    }
+
+    func boundaryWidth(separatorGlyphWidth: CGFloat) -> CGFloat {
+        separatorBlockWidth ?? separatorGlyphWidth + Self.legacySeparatorPadding
+    }
+
+    func attributedText(font: NSFont, defaultColor: NSColor) -> NSAttributedString {
+        let attributed = NSMutableAttributedString(string: "")
+        let blockColor = color ?? defaultColor
+        for run in textRuns {
+            attributed.append(NSAttributedString(
+                string: run.text,
+                attributes: [
+                    .font: font,
+                    .foregroundColor: run.color ?? blockColor,
+                ]
+            ))
+        }
+        return attributed
+    }
+}
+
+private final class PangoMarkupParser: NSObject, XMLParserDelegate {
+    private var runs: [StatusTextRun] = []
+    private var colors: [NSColor?] = []
+    private var valid = true
+
+    static func parse(_ markup: String) -> [StatusTextRun]? {
+        guard let data = "<status>\(markup)</status>".data(using: .utf8) else { return nil }
+        let delegate = PangoMarkupParser()
+        let parser = XMLParser(data: data)
+        parser.delegate = delegate
+        parser.shouldResolveExternalEntities = false
+        parser.externalEntityResolvingPolicy = .never
+        guard parser.parse(), delegate.valid, delegate.colors.isEmpty else { return nil }
+        return delegate.runs
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didStartElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?,
+        attributes attributeDict: [String: String] = [:]
+    ) {
+        if elementName == "status" {
+            guard colors.isEmpty else {
+                valid = false
+                parser.abortParsing()
+                return
+            }
+            colors.append(nil)
+            return
+        }
+        guard elementName == "span", !colors.isEmpty else {
+            valid = false
+            parser.abortParsing()
+            return
+        }
+        let inherited = colors.last ?? nil
+        let rawColor = attributeDict["foreground"] ?? attributeDict["color"]
+        let explicit = parseHexColor(rawColor)
+        if rawColor != nil, explicit == nil {
+            valid = false
+            parser.abortParsing()
+            return
+        }
+        colors.append(explicit ?? inherited)
+    }
+
+    func parser(
+        _ parser: XMLParser,
+        didEndElement elementName: String,
+        namespaceURI: String?,
+        qualifiedName qName: String?
+    ) {
+        guard !colors.isEmpty else {
+            valid = false
+            parser.abortParsing()
+            return
+        }
+        colors.removeLast()
+    }
+
+    func parser(_ parser: XMLParser, foundCharacters string: String) {
+        append(string)
+    }
+
+    func parser(_ parser: XMLParser, foundCDATA CDATABlock: Data) {
+        guard let string = String(data: CDATABlock, encoding: .utf8) else {
+            valid = false
+            parser.abortParsing()
+            return
+        }
+        append(string)
+    }
+
+    private func append(_ string: String) {
+        guard !string.isEmpty, !colors.isEmpty else { return }
+        let color = colors.last ?? nil
+        if let last = runs.indices.last, runs[last].color == color {
+            runs[last].text += string
+        } else {
+            runs.append(StatusTextRun(text: string, color: color))
+        }
+    }
+}
+
+struct StatusRenderItem: Equatable {
+    var blockIndex: Int
+    var boundaryOwnerIndex: Int?
+}
+
+struct StatusLayoutItem: Equatable {
+    var blockIndex: Int
+    var textX: CGFloat
+    var boundaryOwnerIndex: Int?
+    var separatorX: CGFloat?
+}
+
+func statusRenderOrder(blockCount: Int) -> [StatusRenderItem] {
+    guard blockCount > 0 else { return [] }
+    return (0..<blockCount).reversed().map { index in
+        StatusRenderItem(
+            blockIndex: index,
+            boundaryOwnerIndex: index > 0 ? index - 1 : nil
+        )
+    }
+}
+
+func statusLayout(
+    blocks: [StatusBlock],
+    textWidths: [CGFloat],
+    separatorGlyphWidth: CGFloat,
+    rightEdge: CGFloat
+) -> [StatusLayoutItem] {
+    guard blocks.count == textWidths.count else { return [] }
+    var x = rightEdge
+    return statusRenderOrder(blockCount: blocks.count).map { renderItem in
+        x -= textWidths[renderItem.blockIndex]
+        let textX = x
+        var separatorX: CGFloat?
+        if let ownerIndex = renderItem.boundaryOwnerIndex {
+            let owner = blocks[ownerIndex]
+            let boundaryWidth = owner.boundaryWidth(separatorGlyphWidth: separatorGlyphWidth)
+            x -= boundaryWidth
+            if owner.separator {
+                separatorX = x + (boundaryWidth - separatorGlyphWidth) / 2
+            }
+        }
+        return StatusLayoutItem(
+            blockIndex: renderItem.blockIndex,
+            textX: textX,
+            boundaryOwnerIndex: renderItem.boundaryOwnerIndex,
+            separatorX: separatorX
+        )
+    }
+}
+
+func parseStatusBlocks(_ jsonText: String) -> [StatusBlock]? {
+    guard let data = jsonText.data(using: .utf8),
+          let items = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else {
+        return nil
+    }
+    return items.map { item in
+        let text = item["full_text"] as? String ?? ""
+        let color = (item["color"] as? String).flatMap(parseHexColor)
+        let markup = item["markup"] as? String
+        let separator = item["separator"] as? Bool ?? true
+        let separatorBlockWidth: CGFloat?
+        if let number = item["separator_block_width"] as? NSNumber,
+           CFGetTypeID(number) != CFBooleanGetTypeID() {
+            separatorBlockWidth = max(0, CGFloat(truncating: number))
+        } else {
+            separatorBlockWidth = nil
+        }
+        return StatusBlock(
+            text: text,
+            color: color,
+            markup: markup,
+            separator: separator,
+            separatorBlockWidth: separatorBlockWidth
+        )
+    }
 }
 
 final class StatusFeed {
@@ -218,15 +434,7 @@ final class StatusFeed {
                 DispatchQueue.main.async { [weak self] in self?.onUpdate([StatusBlock(text: trimmed, color: nil)]) }
                 continue
             }
-            guard let data = jsonText.data(using: .utf8),
-                  let arr = try? JSONSerialization.jsonObject(with: data) as? [[String: Any]] else { continue }
-            var blocks: [StatusBlock] = []
-            for item in arr {
-                let text = item["full_text"] as? String ?? ""
-                var color: NSColor?
-                if let c = item["color"] as? String { color = hex(c, fallback: .white) }
-                blocks.append(StatusBlock(text: text, color: color))
-            }
+            guard let blocks = parseStatusBlocks(jsonText) else { continue }
             DispatchQueue.main.async { [weak self] in self?.onUpdate(blocks) }
         }
     }
@@ -379,24 +587,26 @@ final class BarView: NSView {
         let statusColor = hex(cfg.bar.colors.statusline, fallback: NSColor(srgbRed: 0xF8/255.0, green: 0xF8/255.0, blue: 0xF2/255.0, alpha: 1.0))
         let separatorColor = hex(cfg.bar.colors.separator, fallback: NSColor(srgbRed: 0xA0/255.0, green: 0xA4/255.0, blue: 0xB8/255.0, alpha: 1.0))
         let blocks = ctrl.statusBlocks.filter { !$0.text.isEmpty }
-        var rx: CGFloat = bounds.width - 8
-        for (i, block) in blocks.reversed().enumerated() {
-            let text = block.text as NSString
-            let attrs: [NSAttributedString.Key: Any] = [
-                .font: font,
-                .foregroundColor: block.color ?? statusColor,
-            ]
-            let s = text.size(withAttributes: attrs)
-            rx -= s.width
-            text.draw(at: NSPoint(x: rx, y: (h - s.height) / 2 - 1), withAttributes: attrs)
-            if i < blocks.count - 1 {
-                rx -= 8
-                let sep = "|" as NSString
-                let sepAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: separatorColor]
-                let ss = sep.size(withAttributes: sepAttrs)
-                rx -= ss.width
-                sep.draw(at: NSPoint(x: rx, y: (h - ss.height) / 2 - 1), withAttributes: sepAttrs)
-                rx -= 8
+        let texts = blocks.map { $0.attributedText(font: font, defaultColor: statusColor) }
+        let sizes = texts.map { $0.size() }
+        let sep = "|" as NSString
+        let sepAttrs: [NSAttributedString.Key: Any] = [.font: font, .foregroundColor: separatorColor]
+        let separatorSize = sep.size(withAttributes: sepAttrs)
+        let layout = statusLayout(
+            blocks: blocks,
+            textWidths: sizes.map(\.width),
+            separatorGlyphWidth: separatorSize.width,
+            rightEdge: bounds.width - 8
+        )
+        for item in layout {
+            let text = texts[item.blockIndex]
+            let size = sizes[item.blockIndex]
+            text.draw(at: NSPoint(x: item.textX, y: (h - size.height) / 2 - 1))
+            if let separatorX = item.separatorX {
+                sep.draw(
+                    at: NSPoint(x: separatorX, y: (h - separatorSize.height) / 2 - 1),
+                    withAttributes: sepAttrs
+                )
             }
         }
         _ = screenFrame
