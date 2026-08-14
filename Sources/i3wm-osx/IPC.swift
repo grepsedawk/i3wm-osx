@@ -257,8 +257,8 @@ final class IPCServer {
 
     private func versionJSON() -> String {
         return jsonString([
-            "major": 0, "minor": 4, "patch": 0,
-            "human_readable": "i3wm-osx 0.4.0",
+            "major": 0, "minor": 4, "patch": 1,
+            "human_readable": "i3wm-osx 0.4.1",
             "loaded_config_file_name": configProvider?().sourcePath ?? "",
         ])
     }
