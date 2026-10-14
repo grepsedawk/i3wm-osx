@@ -103,30 +103,9 @@ enum AX {
     }
 
     @discardableResult
-    static func setMinimized(_ element: AXUIElement, _ on: Bool) -> Bool {
-        AXUIElementSetAttributeValue(element, kAXMinimizedAttribute as CFString, (on ? kCFBooleanTrue : kCFBooleanFalse)!) == .success
-    }
-
-    @discardableResult
     static func setAppHidden(_ pid: pid_t, _ on: Bool) -> Bool {
         let app = AXUIElementCreateApplication(pid)
         return AXUIElementSetAttributeValue(app, kAXHiddenAttribute as CFString, (on ? kCFBooleanTrue : kCFBooleanFalse)!) == .success
-    }
-
-    static func isAppHidden(_ pid: pid_t) -> Bool {
-        let app = AXUIElementCreateApplication(pid)
-        let v: NSNumber? = attribute(app, kAXHiddenAttribute)
-        return v?.boolValue ?? false
-    }
-
-    static func isFullscreen(_ element: AXUIElement) -> Bool {
-        let v: NSNumber? = attribute(element, "AXFullScreen")
-        return v?.boolValue ?? false
-    }
-
-    @discardableResult
-    static func setFullscreen(_ element: AXUIElement, _ on: Bool) -> Bool {
-        AXUIElementSetAttributeValue(element, "AXFullScreen" as CFString, on as CFBoolean) == .success
     }
 
     static func windowID(_ element: AXUIElement) -> CGWindowID? {

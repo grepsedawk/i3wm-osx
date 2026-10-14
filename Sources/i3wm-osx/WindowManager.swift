@@ -944,14 +944,7 @@ final class WindowManager {
         if previous === ws {
             pendingSplit = .none
             ledger.setCurrent(ws)
-            let leaf = ws.tree.deepestFocusedLeaf()
-            if let firstWin = leaf.window {
-                focused = leaf
-                intentFocus(firstWin)
-                if config.mouseFollowsFocus { warpMouseToFocus(leaf) }
-            } else {
-                focused = ws.tree
-            }
+            restoreFocus(in: ws)
             bar?.refresh()
             return
         }
@@ -966,11 +959,6 @@ final class WindowManager {
         // Restore windows on the workspace we're showing. Order matters:
         // first re-tile (positions them correctly), then make them visible —
         // otherwise the user briefly sees them at their stale off-screen rect.
-        for w in ws.tree.collectWindows() where w.minimizedByUs {
-            // legacy minimize cleanup
-            AX.setMinimized(w.element, false)
-            w.minimizedByUs = false
-        }
         applyAllLayouts()
         for w in ws.tree.collectWindows() where w.hiddenByUs {
             showWindow(w)
@@ -985,15 +973,19 @@ final class WindowManager {
                 hideWindow(w)
             }
         }
-        let leaf = ws.tree.deepestFocusedLeaf()
-        if let firstWin = leaf.window {
+        restoreFocus(in: ws)
+        bar?.refresh()
+    }
+
+    private func restoreFocus(in workspace: Workspace) {
+        let leaf = workspace.tree.deepestFocusedLeaf()
+        if let window = leaf.window {
             focused = leaf
-            intentFocus(firstWin)
+            intentFocus(window)
             if config.mouseFollowsFocus { warpMouseToFocus(leaf) }
         } else {
-            focused = ws.tree
+            focused = workspace.tree
         }
-        bar?.refresh()
     }
 
     func moveContainerToWorkspace(name: String) {
@@ -1018,14 +1010,7 @@ final class WindowManager {
         // The moved container was the focused one, so move focus to whatever
         // leaf is left in the source workspace.
         if let src = sourceWs {
-            let leaf = src.tree.deepestFocusedLeaf()
-            if let win = leaf.window {
-                focused = leaf
-                intentFocus(win)
-                if config.mouseFollowsFocus { warpMouseToFocus(leaf) }
-            } else {
-                focused = src.tree
-            }
+            restoreFocus(in: src)
         }
 
         applyAllLayouts()
@@ -1156,7 +1141,6 @@ final class WindowManager {
         applyAllLayouts()
     }
 
-    private func d_orientation(_ d: Direction) -> Orientation { d.orientation }
 
     func gapsAdjust(kind: String, delta: CGFloat) {
         switch kind {

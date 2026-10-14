@@ -40,7 +40,7 @@ What works:
 - Tree-based tiling (splith, splitv, tabbed, stacking) with i3 layout semantics
 - Numbered workspaces with `workspace_auto_back_and_forth`
 - Multi-monitor "outputs"
-- i3 config parser: `set $var`, `bindsym`, `exec[_always]`, `for_window`, `mode`, gaps, colors, `floating_modifier`, bar block
+- i3 config parser: `set $var`, `bindsym`, `exec[_always]`, `for_window`, `mode`, gaps, bar block and colors
 - i3 command parser/executor for: `focus`, `move`, `split`, `layout`, `workspace`, `kill`, `exec`, `fullscreen`, `floating`, `gaps`, `mode`, `resize`, `reload`, `restart`, `exit`
 - Global hotkeys via `CGEventTap` (Mod4 → Command, Mod1 → Option)
 - i3 IPC over UNIX socket with `i3-msg` companion CLI (`RUN_COMMAND`, `GET_WORKSPACES`, `GET_OUTPUTS`, `GET_TREE`, `GET_VERSION`)
@@ -107,6 +107,12 @@ The first thing the daemon prints to stderr is a diagnostic block telling you wh
 If trust is DENIED and you grant it after launch, the daemon polls every 2 seconds and re-bootstraps automatically — you don't need to restart it.
 
 ## Notes on the config
+
+Some i3 settings are accepted but have no effect: top-level `font`,
+`default_border`, `focus_on_window_activation`, `floating_modifier`, `client.*`,
+bar `tray_padding`, and bar color `urgent_workspace`. `bindsym --release` still
+fires on key press; `exec --no-startup-id` runs like plain `exec`. These settings
+remain in the original config text returned by IPC.
 
 i3 conventions are preserved as written:
 

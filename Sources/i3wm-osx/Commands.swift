@@ -23,7 +23,7 @@ enum I3Command {
     case workspaceNext
     case workspacePrev
     case kill
-    case exec(String, noStartupId: Bool)
+    case exec(String)
     case gapsAdjust(kind: String, deltaSign: Int, amount: CGFloat)
     case mode(String)
     case resize(grow: Bool, axis: String, px: CGFloat, ppt: CGFloat)
@@ -113,14 +113,12 @@ enum CommandParser {
         case "kill":
             return .kill
         case "exec":
-            var noStartup = false
             var args = rest
             while let f = args.first, f.hasPrefix("--") {
-                if f == "--no-startup-id" { noStartup = true }
                 args.removeFirst()
             }
             let cmd = args.map { stripQuotes($0) }.joined(separator: " ")
-            return .exec(cmd, noStartupId: noStartup)
+            return .exec(cmd)
         case "gaps":
             return parseGaps(rest)
         case "mode":
@@ -266,7 +264,7 @@ enum CommandExecutor {
             }
             return true
         case .kill: mgr.killFocused(); return true
-        case .exec(let command, _):
+        case .exec(let command):
             shell(command); return true
         case .gapsAdjust(let kind, let sign, let amount):
             mgr.gapsAdjust(kind: kind, delta: CGFloat(sign) * amount); return true

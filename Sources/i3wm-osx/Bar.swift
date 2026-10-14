@@ -306,26 +306,10 @@ private final class PangoMarkupParser: NSObject, XMLParserDelegate {
     }
 }
 
-struct StatusRenderItem: Equatable {
-    var blockIndex: Int
-    var boundaryOwnerIndex: Int?
-}
-
 struct StatusLayoutItem: Equatable {
     var blockIndex: Int
     var textX: CGFloat
-    var boundaryOwnerIndex: Int?
     var separatorX: CGFloat?
-}
-
-func statusRenderOrder(blockCount: Int) -> [StatusRenderItem] {
-    guard blockCount > 0 else { return [] }
-    return (0..<blockCount).reversed().map { index in
-        StatusRenderItem(
-            blockIndex: index,
-            boundaryOwnerIndex: index > 0 ? index - 1 : nil
-        )
-    }
 }
 
 func statusLayout(
@@ -336,12 +320,12 @@ func statusLayout(
 ) -> [StatusLayoutItem] {
     guard blocks.count == textWidths.count else { return [] }
     var x = rightEdge
-    return statusRenderOrder(blockCount: blocks.count).map { renderItem in
-        x -= textWidths[renderItem.blockIndex]
+    return blocks.indices.reversed().map { index in
+        x -= textWidths[index]
         let textX = x
         var separatorX: CGFloat?
-        if let ownerIndex = renderItem.boundaryOwnerIndex {
-            let owner = blocks[ownerIndex]
+        if index > 0 {
+            let owner = blocks[index - 1]
             let boundaryWidth = owner.boundaryWidth(separatorGlyphWidth: separatorGlyphWidth)
             x -= boundaryWidth
             if owner.separator {
@@ -349,9 +333,8 @@ func statusLayout(
             }
         }
         return StatusLayoutItem(
-            blockIndex: renderItem.blockIndex,
+            blockIndex: index,
             textX: textX,
-            boundaryOwnerIndex: renderItem.boundaryOwnerIndex,
             separatorX: separatorX
         )
     }
@@ -456,8 +439,6 @@ final class StatusFeed {
 
 final class BarWindow: NSPanel {
     let view: BarView
-    weak var screenRef: NSScreen?
-    weak var controller: BarController?
     static let defaultHeight: CGFloat = 28
 
     static func height(for cfg: I3Config) -> CGFloat {
@@ -472,8 +453,6 @@ final class BarWindow: NSPanel {
         let barY = atBottom ? visible.minY : visible.maxY - h
         let barFrame = NSRect(x: visible.minX, y: barY, width: visible.width, height: h)
         self.view = BarView(frame: NSRect(origin: .zero, size: barFrame.size))
-        self.screenRef = screen
-        self.controller = controller
         super.init(contentRect: barFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.isFloatingPanel = true
         self.isMovable = false
@@ -523,7 +502,6 @@ final class BarView: NSView {
 
         let mgr = ctrl.manager
         let screen = screenRef
-        let screenFrame = screen?.frame ?? .zero
 
         var x: CGFloat = 6
         let y: CGFloat = 0
@@ -623,6 +601,5 @@ final class BarView: NSView {
                 )
             }
         }
-        _ = screenFrame
     }
 }

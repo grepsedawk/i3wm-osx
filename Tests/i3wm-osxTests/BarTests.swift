@@ -105,10 +105,6 @@ final class BarTests: XCTestCase {
         ]
         """))
 
-        XCTAssertEqual(statusRenderOrder(blockCount: blocks.count), [
-            StatusRenderItem(blockIndex: 1, boundaryOwnerIndex: 0),
-            StatusRenderItem(blockIndex: 0, boundaryOwnerIndex: nil),
-        ])
         XCTAssertFalse(blocks[0].separator)
         XCTAssertEqual(blocks[0].boundaryWidth(separatorGlyphWidth: 7), 0)
 
@@ -157,15 +153,47 @@ final class BarTests: XCTestCase {
           {"full_text":"C","separator":false,"separator_block_width":19}
         ]
         """))
-        let order = statusRenderOrder(blockCount: blocks.count)
+        let layout = statusLayout(
+            blocks: blocks,
+            textWidths: [10, 20, 30],
+            separatorGlyphWidth: 7,
+            rightEdge: 100
+        )
 
-        XCTAssertEqual(order, [
-            StatusRenderItem(blockIndex: 2, boundaryOwnerIndex: 1),
-            StatusRenderItem(blockIndex: 1, boundaryOwnerIndex: 0),
-            StatusRenderItem(blockIndex: 0, boundaryOwnerIndex: nil),
-        ])
-        XCTAssertEqual(order.compactMap(\.boundaryOwnerIndex).map { blocks[$0].separatorBlockWidth }, [11, 3])
-        XCTAssertEqual(order.compactMap(\.boundaryOwnerIndex).map { blocks[$0].separator }, [true, false])
+        XCTAssertEqual(layout.map(\.blockIndex), [2, 1, 0])
+        XCTAssertEqual(layout.map(\.textX), [70, 39, 26])
+        XCTAssertEqual(layout.map(\.separatorX), [61, nil, nil])
+    }
+
+    func testSingleBlockHasNoBoundaryGapOrSeparator() {
+        let layout = statusLayout(
+            blocks: [StatusBlock(text: "only", color: nil, separatorBlockWidth: 19)],
+            textWidths: [30],
+            separatorGlyphWidth: 7,
+            rightEdge: 100
+        )
+
+        XCTAssertEqual(layout.map(\.blockIndex), [0])
+        XCTAssertEqual(layout.map(\.textX), [70])
+        XCTAssertEqual(layout.map(\.separatorX), [nil])
+    }
+
+    func testEmptyStatusHasNoLayout() {
+        XCTAssertTrue(statusLayout(
+            blocks: [],
+            textWidths: [],
+            separatorGlyphWidth: 7,
+            rightEdge: 100
+        ).isEmpty)
+    }
+
+    func testMismatchedTextWidthsHaveNoLayout() {
+        XCTAssertTrue(statusLayout(
+            blocks: [StatusBlock(text: "only", color: nil)],
+            textWidths: [],
+            separatorGlyphWidth: 7,
+            rightEdge: 100
+        ).isEmpty)
     }
 
     func testBooleanSeparatorWidthIsIgnored() throws {

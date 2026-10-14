@@ -24,7 +24,6 @@ final class ManagedWindow {
     var isFloating: Bool = false
     var savedFloatingFrame: CGRect?
     var fullscreen: Bool = false
-    var minimizedByUs: Bool = false
     var hiddenByUs: Bool = false
 
     // Stamped whenever the WM itself moves the window. Mouse-driven snap-back

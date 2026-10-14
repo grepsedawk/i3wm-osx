@@ -4,7 +4,6 @@ import CoreGraphics
 struct Keybinding {
     var keyspec: String
     var commandText: String
-    var release: Bool = false
 }
 
 struct ModeDef {
@@ -24,25 +23,15 @@ struct BarColors {
     var focusedWorkspace: [String] = []
     var activeWorkspace: [String] = []
     var inactiveWorkspace: [String] = []
-    var urgentWorkspace: [String] = []
     var bindingMode: [String] = []
 }
 
 struct BarConfig {
     var statusCommand: String?
     var workspaceMinWidth: Int = 0
-    var trayPadding: Int = 0
     var position: String = "top"
     var font: String?
     var colors: BarColors = BarColors()
-}
-
-struct ClientColors {
-    var border: String
-    var background: String
-    var text: String
-    var indicator: String?
-    var childBorder: String?
 }
 
 struct I3Config {
@@ -53,16 +42,10 @@ struct I3Config {
     var execs: [(once: Bool, command: String)] = []
     var modes: [ModeDef] = []
     var forWindow: [ForWindowRule] = []
-    var fontPango: String?
-    var defaultBorder: String = "normal"
     var smartGaps: Bool = false
     var innerGap: CGFloat = 0
     var outerGap: CGFloat = 0
-    var focusOnWindowActivation: String = "smart"
-    var clientColors: [String: ClientColors] = [:]
-    var clientBackground: String?
     var bar: BarConfig = BarConfig()
-    var floatingModifier: String?
     var workspaceAutoBackAndForth: Bool = false
     var mouseFollowsFocus: Bool = false
 
@@ -159,18 +142,10 @@ private final class I3ConfigParser {
             if let b = parseBindsym(tokens) { cfg.bindings.append(b) }
         case "for_window":
             if let r = parseForWindow(line) { cfg.forWindow.append(r) }
-        case "font":
-            cfg.fontPango = extractAfter(line, prefix: "font").trimmingCharacters(in: .whitespaces)
-        case "default_border":
-            cfg.defaultBorder = tokens.count > 1 ? tokens[1] : "normal"
         case "smart_gaps":
             cfg.smartGaps = (tokens.count > 1 && tokens[1] == "on")
         case "gaps":
             try parseGaps(tokens, into: &cfg)
-        case "focus_on_window_activation":
-            cfg.focusOnWindowActivation = tokens.count > 1 ? tokens[1] : "smart"
-        case "floating_modifier":
-            cfg.floatingModifier = tokens.count > 1 ? tokens[1] : nil
         case "workspace_auto_back_and_forth":
             cfg.workspaceAutoBackAndForth = (tokens.count > 1 && (tokens[1] == "yes" || tokens[1] == "true"))
         case "mouse_follows_focus":
@@ -181,21 +156,8 @@ private final class I3ConfigParser {
             try handleModeBlock(tokens: tokens, into: &cfg)
         case "bar":
             try handleBarBlock(tokens: tokens, into: &cfg)
-        case "client.background":
-            if tokens.count > 1 { cfg.clientBackground = tokens[1] }
         default:
-            if first.hasPrefix("client.") {
-                let key = String(first.dropFirst("client.".count))
-                let cols = Array(tokens.dropFirst())
-                guard cols.count >= 3 else { return }
-                cfg.clientColors[key] = ClientColors(
-                    border: cols[0],
-                    background: cols[1],
-                    text: cols[2],
-                    indicator: cols.count > 3 ? cols[3] : nil,
-                    childBorder: cols.count > 4 ? cols[4] : nil
-                )
-            }
+            break
         }
     }
 
@@ -246,8 +208,6 @@ private final class I3ConfigParser {
                 cfg.bar.statusCommand = extractAfter(substituted, prefix: "status_command").trimmingCharacters(in: .whitespaces)
             case "workspace_min_width":
                 cfg.bar.workspaceMinWidth = Int(toks.dropFirst().first ?? "0") ?? 0
-            case "tray_padding":
-                cfg.bar.trayPadding = Int(toks.dropFirst().first ?? "0") ?? 0
             case "position":
                 cfg.bar.position = toks.count > 1 ? toks[1] : "top"
             case "font":
@@ -277,7 +237,6 @@ private final class I3ConfigParser {
             case "focused_workspace": cfg.bar.colors.focusedWorkspace = rest
             case "active_workspace": cfg.bar.colors.activeWorkspace = rest
             case "inactive_workspace": cfg.bar.colors.inactiveWorkspace = rest
-            case "urgent_workspace": cfg.bar.colors.urgentWorkspace = rest
             case "binding_mode": cfg.bar.colors.bindingMode = rest
             default: break
             }
@@ -289,14 +248,12 @@ private final class I3ConfigParser {
     private func parseBindsym(_ toks: [String]) -> Keybinding? {
         var t = toks
         t.removeFirst()
-        var release = false
         while let first = t.first, first.hasPrefix("--") {
-            if first == "--release" { release = true }
             t.removeFirst()
         }
         guard let key = t.first else { return nil }
         let cmd = t.dropFirst().joined(separator: " ")
-        return Keybinding(keyspec: key, commandText: cmd, release: release)
+        return Keybinding(keyspec: key, commandText: cmd)
     }
 
     private func parseGaps(_ toks: [String], into cfg: inout I3Config) throws {

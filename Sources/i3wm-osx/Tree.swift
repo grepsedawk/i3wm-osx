@@ -6,8 +6,6 @@ enum Layout: String {
     case splitV = "splitv"
     case tabbed
     case stacking
-
-    var isSplit: Bool { self == .splitH || self == .splitV }
 }
 
 enum Orientation { case horizontal, vertical, none
@@ -69,8 +67,6 @@ final class Container {
     var window: ManagedWindow? {
         if case .window(let w) = kind { return w } else { return nil }
     }
-
-    var isLeaf: Bool { children.isEmpty }
 
     func add(_ child: Container, at index: Int? = nil) {
         // A reparent that drops a node inside its own subtree makes the tree
@@ -250,26 +246,23 @@ enum LayoutEngine {
     private static func placeTabbed(container: Container, rect: CGRect, ctx: LayoutContext, leafCount: Int) {
         let tabHeight: CGFloat = 22
         let inner = CGRect(x: rect.minX, y: rect.minY + tabHeight, width: rect.width, height: rect.height - tabHeight)
-        let active = container.lastFocusedChild
-        for child in container.children {
-            if child === active {
-                applyLayout(container: child, rect: inner, ctx: ctx, leafCount: leafCount)
-            } else {
-                applyLayout(container: child, rect: CGRect(x: -10000, y: -10000, width: inner.width, height: inner.height), ctx: ctx, leafCount: leafCount)
-            }
-        }
+        placeFocusedChild(container: container, rect: inner, ctx: ctx, leafCount: leafCount)
     }
 
     private static func placeStacked(container: Container, rect: CGRect, ctx: LayoutContext, leafCount: Int) {
         let titleH: CGFloat = 18
         let stackH = titleH * CGFloat(container.children.count)
         let inner = CGRect(x: rect.minX, y: rect.minY + stackH, width: rect.width, height: max(rect.height - stackH, 0))
+        placeFocusedChild(container: container, rect: inner, ctx: ctx, leafCount: leafCount)
+    }
+
+    private static func placeFocusedChild(container: Container, rect: CGRect, ctx: LayoutContext, leafCount: Int) {
         let active = container.lastFocusedChild
         for child in container.children {
             if child === active {
-                applyLayout(container: child, rect: inner, ctx: ctx, leafCount: leafCount)
+                applyLayout(container: child, rect: rect, ctx: ctx, leafCount: leafCount)
             } else {
-                applyLayout(container: child, rect: CGRect(x: -10000, y: -10000, width: inner.width, height: inner.height), ctx: ctx, leafCount: leafCount)
+                applyLayout(container: child, rect: CGRect(x: -10000, y: -10000, width: rect.width, height: rect.height), ctx: ctx, leafCount: leafCount)
             }
         }
     }
