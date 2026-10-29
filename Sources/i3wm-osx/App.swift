@@ -138,6 +138,8 @@ final class I3App {
             } else if !now && self.lastTrust {
                 Logger.warn("Accessibility trust LOST")
                 self.lastTrust = false
+            } else if now {
+                self.manager.recoverOrphanWindows()
             }
         }
         timer.resume()

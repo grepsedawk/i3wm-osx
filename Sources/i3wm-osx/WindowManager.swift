@@ -41,6 +41,8 @@ final class WindowManager {
     private var snapBackWork: [CGWindowID: DispatchWorkItem] = [:]
     private static let snapBackDebounce: TimeInterval = 0.2
     private static let snapBackTolerance: CGFloat = 4
+    private let recoveryQueue = DispatchQueue(label: "i3wm-osx.recovery", qos: .utility)
+    private var recoveryInFlight = false
 
     var modeStack: [String] = []
 
@@ -99,25 +101,87 @@ final class WindowManager {
 
     func scanExistingWindows() {
         for entry in WindowDiscovery.enumerateAll() {
-            adopt(element: entry.element, pid: entry.pid, id: entry.id)
+            adopt(entry, into: currentWorkspace())
+        }
+    }
+
+    func recoverOrphanWindows() {
+        guard !recoveryInFlight else { return }
+        let candidates = WindowDiscovery.recoveryCandidates(
+            CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as? [[String: Any]] ?? [],
+            excluding: Set(windowsByID.keys)
+        )
+        recoverOrphanWindows(candidates: candidates)
+    }
+
+    func recoverOrphanWindows(
+        candidates: [WindowCandidate],
+        discover: @escaping ([WindowCandidate]) -> [DiscoveredWindow] = { WindowDiscovery.enumerateAll(candidates: $0) }
+    ) {
+        guard !recoveryInFlight, !candidates.isEmpty, let fallback = ledger.current ?? ledger.workspaces.first else { return }
+        let visible = outputs.compactMap { out in out.activeWorkspace.map { ($0, out.frame) } }
+        // Discovery can finish after a workspace switch; keep the original owner.
+        let targets = candidates.reduce(into: [CGWindowID: Workspace]()) { targets, candidate in
+            targets[candidate.id] = orphanWorkspace(frame: candidate.frame, visible: visible, fallback: fallback)
+        }
+        recoveryInFlight = true
+        recoveryQueue.async { [weak self] in
+            let entries = discover(candidates)
+            DispatchQueue.main.async { [weak self] in
+                guard let self else { return }
+                self.recoveryInFlight = false
+                var recovered: [(DiscoveredWindow, Workspace)] = []
+                for entry in entries where self.windowsByID[entry.id] == nil {
+                    guard NSRunningApplication(processIdentifier: entry.pid)?.isHidden != true else { continue }
+                    AXUIElementSetMessagingTimeout(entry.element, 0.05)
+                    guard AX.windowID(entry.element) == entry.id, !AX.isMinimized(entry.element),
+                          let target = targets[entry.id] else { continue }
+                    recovered.append((entry, target))
+                }
+                self.absorbOrphanWindows(recovered)
+            }
+        }
+    }
+
+    func absorbOrphanWindows(_ entries: [(DiscoveredWindow, Workspace)]) {
+        var adopted: [(ManagedWindow, Workspace)] = []
+        for (entry, target) in entries where windowsByID[entry.id] == nil {
+            if let window = adopt(entry, into: target, recovering: true) {
+                adopted.append((window, target))
+            }
+        }
+        // Register visible siblings before deciding whether the entire app can hide.
+        for (window, target) in adopted where !outputs.contains(where: { $0.activeWorkspace === target }) {
+            hideWindow(window)
+        }
+        if !adopted.isEmpty {
+            applyAllLayouts()
+            bar?.refresh()
         }
     }
 
     @discardableResult
     func adopt(element: AXUIElement, pid: pid_t, id: CGWindowID) -> ManagedWindow? {
+        if let existing = windowsByID[id] { return existing }
+        return adopt(DiscoveredWindow(pid: pid, element: element, id: id), into: currentWorkspace())
+    }
+
+    @discardableResult
+    func adopt(_ entry: DiscoveredWindow, into ws: Workspace, recovering: Bool = false) -> ManagedWindow? {
+        let (pid, element, id) = (entry.pid, entry.element, entry.id)
         guard id != 0 else { return nil }
         if let existing = windowsByID[id] { return existing }
         let runningApp = NSRunningApplication(processIdentifier: pid)
         let appName = runningApp?.localizedName ?? ""
         let bundleID = runningApp?.bundleIdentifier
-        let title = AX.title(element) ?? ""
-        let subrole = AX.subrole(element) ?? "?"
-        let size = AX.size(element) ?? .zero
+        let title = entry.title
+        let subrole = entry.subrole ?? "?"
+        let size = entry.frame?.size ?? .zero
         Logger.info("adopt: [\(appName)] \(title.isEmpty ? "<untitled>" : title) (id=\(id), subrole=\(subrole), size=\(Int(size.width))×\(Int(size.height)))")
         let mw = ManagedWindow(element: element, pid: pid, id: id, appName: appName, title: title, bundleID: bundleID)
-        if let frame = AX.frame(element) { mw.lastKnownFrame = frame }
+        if let frame = entry.frame { mw.lastKnownFrame = frame }
         windowsByID[id] = mw
-        if shouldFloat(window: mw) {
+        if shouldFloat(window: mw, subrole: entry.subrole) {
             mw.isFloating = true
             mw.savedFloatingFrame = mw.lastKnownFrame
             floatingWindows.insert(id)
@@ -127,12 +191,18 @@ final class WindowManager {
         // tiling but the tree association is what guarantees the "every
         // window lives on exactly one workspace" invariant.
         let leaf = Container(kind: .window(mw))
-        let ws = ledger.current ?? ledger.workspaces.first!
-        attach(leaf, into: ws.tree)
+        if recovering {
+            let focusOrder = ws.tree.focusOrder
+            ws.tree.add(leaf)
+            ws.tree.focusOrder = [leaf.id] + focusOrder
+            Logger.info("recovered orphan: id=\(id) workspace=\(ws.name)")
+        } else {
+            attach(leaf, into: ws.tree)
+            focused = leaf
+            ws.tree.bumpFocus(leaf)
+        }
         containerByWindowID[id] = leaf
-        focused = leaf
-        ws.tree.bumpFocus(leaf)
-        observe(pid: pid, element: element)
+        observe(pid: pid, element: element, recovering: recovering)
         if mw.hasGeometryQuirk { scheduleGeometrySettle(id: id) }
         return mw
     }
@@ -172,14 +242,16 @@ final class WindowManager {
         }
     }
 
-    private func shouldFloat(window: ManagedWindow) -> Bool {
+    private func shouldFloat(window: ManagedWindow, subrole: String?) -> Bool {
+        let isDialog = subrole == kAXDialogSubrole
         for rule in config.forWindow {
             if matches(window: window, criteria: rule.criteria) {
                 let cmd = rule.command.lowercased()
+                if isDialog && cmd.contains("floating disable") { return false }
                 if cmd.contains("floating enable") || cmd.contains("floating toggle") { return true }
             }
         }
-        return false
+        return isDialog
     }
 
     func matches(window: ManagedWindow, criteria: [String: String]) -> Bool {
@@ -341,10 +413,11 @@ final class WindowManager {
             applyTreeFrames(ws.tree)
         }
         for id in floatingWindows {
-            if let mw = windowsByID[id] {
-                if let saved = mw.savedFloatingFrame {
-                    mw.apply(frame: saved)
-                }
+            guard let mw = windowsByID[id], !mw.hiddenByUs,
+                  let container = containerByWindowID[id], let workspace = workspaceContaining(container),
+                  outputs.contains(where: { $0.activeWorkspace === workspace }) else { continue }
+            if let saved = mw.savedFloatingFrame {
+                mw.apply(frame: saved)
             }
         }
     }
@@ -516,7 +589,11 @@ final class WindowManager {
         applyAllLayouts()
     }
 
-    private func observe(pid: pid_t, element: AXUIElement) {
+    private func observe(pid: pid_t, element: AXUIElement, recovering: Bool = false) {
+        if recovering { AXUIElementSetMessagingTimeout(element, 0.05) }
+        defer {
+            if recovering { AXUIElementSetMessagingTimeout(element, 0) }
+        }
         let refcon = Unmanaged.passUnretained(self).toOpaque()
         if let obs = observers[pid] {
             AXObserverAddNotification(obs, element, kAXUIElementDestroyedNotification as CFString, refcon)
@@ -571,6 +648,7 @@ final class WindowManager {
         AXObserverAddNotification(obs, element, kAXMovedNotification as CFString, refcon)
         AXObserverAddNotification(obs, element, kAXResizedNotification as CFString, refcon)
         let appElem = AXUIElementCreateApplication(pid)
+        if recovering { AXUIElementSetMessagingTimeout(appElem, 0.05) }
         AXObserverAddNotification(obs, appElem, kAXWindowCreatedNotification as CFString, refcon)
         AXObserverAddNotification(obs, appElem, kAXFocusedWindowChangedNotification as CFString, refcon)
         AXObserverAddNotification(obs, appElem, kAXApplicationHiddenNotification as CFString, refcon)
@@ -927,6 +1005,7 @@ final class WindowManager {
     }
 
     func switchWorkspace(name: String) {
+        recoverOrphanWindows()
         sweepPhantoms()
         let ws: Workspace
         if let existing = ledger.workspaces.first(where: { $0.name == name }) {

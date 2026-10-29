@@ -27,7 +27,7 @@ if args.contains("--help") || args.contains("-h") {
 }
 
 if args.contains("--version") {
-    print("i3wm-osx 0.4.1")
+    print("i3wm-osx 0.4.2")
     exit(0)
 }
 

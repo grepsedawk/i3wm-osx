@@ -2,6 +2,21 @@ import AppKit
 import Foundation
 import CoreGraphics
 
+func orphanWorkspace(frame: CGRect?, visible: [(Workspace, CGRect)], fallback: Workspace) -> Workspace {
+    guard let frame else { return fallback }
+    var target = fallback
+    var largestOverlap: CGFloat = 0
+    for (workspace, outputFrame) in visible {
+        let overlap = frame.intersection(outputFrame)
+        let area = overlap.isNull ? 0 : overlap.width * overlap.height
+        if area > largestOverlap {
+            largestOverlap = area
+            target = workspace
+        }
+    }
+    return target
+}
+
 final class Workspace {
     let name: String
     let number: Int?
