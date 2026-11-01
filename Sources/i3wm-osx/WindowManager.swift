@@ -564,14 +564,35 @@ final class WindowManager {
     }
 
     func handleAppTerminated(_ app: NSRunningApplication) {
-        let pid = app.processIdentifier
+        forgetApplication(pid: app.processIdentifier)
+        applyAllLayouts()
+        bar?.refresh()
+    }
+
+    @discardableResult
+    func pruneTerminatedApplications(isTerminated: (pid_t) -> Bool = { pid in
+        // Hidden windows can lose AX geometry; only ESRCH proves owner death.
+        pid > 0 && kill(pid, 0) == -1 && errno == ESRCH
+    }) -> Bool {
+        let trackedPIDs = Set(windowsByID.values.map(\.pid)).union(observers.keys).union(pendingOurHides.keys)
+        let deadPIDs = trackedPIDs.filter(isTerminated)
+        guard !deadPIDs.isEmpty else { return false }
+        for pid in deadPIDs {
+            Logger.info("removing terminated app: pid=\(pid)")
+            forgetApplication(pid: pid)
+        }
+        applyAllLayouts()
+        bar?.refresh()
+        return true
+    }
+
+    private func forgetApplication(pid: pid_t) {
         let dead = windowsByID.values.filter { $0.pid == pid }.map { $0.id }
         for id in dead { release(id: id) }
         if let obs = observers.removeValue(forKey: pid) {
             CFRunLoopRemoveSource(CFRunLoopGetMain(), AXObserverGetRunLoopSource(obs), .defaultMode)
         }
-        applyAllLayouts()
-        bar?.refresh()
+        pendingOurHides.removeValue(forKey: pid)
     }
 
     func handleSpaceChanged() {
@@ -1005,6 +1026,7 @@ final class WindowManager {
     }
 
     func switchWorkspace(name: String) {
+        pruneTerminatedApplications()
         recoverOrphanWindows()
         sweepPhantoms()
         let ws: Workspace

@@ -125,6 +125,7 @@ final class I3App {
         timer.schedule(deadline: .now() + 2, repeating: 2)
         timer.setEventHandler { [weak self] in
             guard let self else { return }
+            self.manager.pruneTerminatedApplications()
             let now = AXIsProcessTrusted()
             if now && !self.lastTrust {
                 Logger.info("Accessibility trust GAINED — re-bootstrapping window manager")
