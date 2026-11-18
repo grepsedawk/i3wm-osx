@@ -138,7 +138,7 @@ Linux-only commands like `pactl`, `rofi`, `xmodmap` will simply fail to exec; re
 
 ## Releases
 
-- `.github/workflows/release.yml` — on `v*` tag push, builds `.app` on macOS-14 (arm64), signs with the `i3wm-osx-ci` cert imported from `MACOS_CERT_BASE64` / `MACOS_CERT_PASSWORD` GH secrets, tarballs with the bundled config example, attaches to the GH release. The Homebrew formula at [grepsedawk/homebrew-tap](https://github.com/grepsedawk/homebrew-tap) installs that prebuilt artifact — same cdhash for every user, so TCC grants persist across `brew upgrade`.
+- `.github/workflows/release.yml` — on `v*` tag push, builds `.app` on macOS 15 (arm64), signs with the `i3wm-osx-ci` cert imported from `MACOS_CERT_BASE64` / `MACOS_CERT_PASSWORD` GH secrets, tarballs with the bundled config example, attaches to the GH release. The Homebrew formula at [grepsedawk/homebrew-tap](https://github.com/grepsedawk/homebrew-tap) installs that prebuilt artifact — same cdhash for every user, so TCC grants persist across `brew upgrade`.
 
 ## Architecture
 
