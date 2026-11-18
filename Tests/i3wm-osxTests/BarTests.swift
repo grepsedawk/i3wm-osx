@@ -6,6 +6,23 @@ final class BarTests: XCTestCase {
     private let font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
     private let statusColor = NSColor(srgbRed: 0.9, green: 0.9, blue: 0.9, alpha: 1)
 
+    func testFullscreenWindowOnlyCoversItsOwnDisplay() {
+        let primary = CGRect(x: 0, y: 0, width: 1696, height: 1060)
+        let secondary = CGRect(x: -1440, y: -120, width: 1440, height: 900)
+        func window(_ frame: CGRect, layer: Int = 0, alpha: Double = 1) -> [String: Any] {
+            [kCGWindowBounds as String: frame.dictionaryRepresentation,
+             kCGWindowLayer as String: layer,
+             kCGWindowAlpha as String: alpha]
+        }
+        let otherWindows = [window(primary, layer: 25), window(primary, alpha: 0),
+                            window(primary.insetBy(dx: 0, dy: 14))]
+        let fullscreenFrames = onscreenAppWindowFrames([window(secondary)] + otherWindows)
+        XCTAssertEqual([primary, secondary].filter { fullscreenFrames.contains($0) }, [secondary])
+
+        let restoredFrames = onscreenAppWindowFrames(otherWindows)
+        XCTAssertFalse([primary, secondary].contains { restoredFrames.contains($0) })
+    }
+
     func testPlainBlockPreservesDefaultsAndBlockColor() throws {
         let block = try XCTUnwrap(parseStatusBlocks("""
         [{"full_text":"plain &amp; text","color":"#112233"}]

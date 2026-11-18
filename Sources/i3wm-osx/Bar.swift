@@ -109,16 +109,26 @@ final class BarController {
     var config: I3Config = I3Config()
     private var statusFeed: StatusFeed?
     private(set) var statusBlocks: [StatusBlock] = []
-    private var hidden = false
+    private var i3Fullscreen = false
 
-    /// Hide the bar while an i3-fullscreen window is up so the window covers
-    /// its strip instead of a tile sliding under it. (Native macOS fullscreen
-    /// is handled by the bar not joining all Spaces — see BarWindow.init.)
     func setHidden(_ hidden: Bool) {
-        guard hidden != self.hidden else { return }
-        self.hidden = hidden
+        guard hidden != i3Fullscreen else { return }
+        i3Fullscreen = hidden
+        updateVisibility()
+    }
+
+    func updateVisibility() {
+        guard !windows.isEmpty else { return }
+        if i3Fullscreen {
+            for w in windows { w.setSuppressed(true) }
+            return
+        }
+        let snapshot = CGWindowListCopyWindowInfo(
+            [.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID
+        ) as? [[String: Any]] ?? []
+        let frames = onscreenAppWindowFrames(snapshot)
         for w in windows {
-            if hidden { w.orderOut(nil) } else { w.orderFront(nil) }
+            w.setSuppressed(frames.contains(w.displayFrame))
         }
     }
 
@@ -147,8 +157,9 @@ final class BarController {
         for screen in NSScreen.screens {
             let w = BarWindow(screen: screen, controller: self)
             windows.append(w)
-            if !hidden { w.orderFront(nil) }
         }
+        updateVisibility()
+        for w in windows { w.orderFront(nil) }
         refresh()
     }
 
@@ -437,8 +448,18 @@ final class StatusFeed {
     }
 }
 
+func onscreenAppWindowFrames(_ windows: [[String: Any]]) -> [CGRect] {
+    windows.compactMap { window in
+        guard (window[kCGWindowLayer as String] as? NSNumber)?.intValue == 0,
+              let alpha = window[kCGWindowAlpha as String] as? NSNumber, alpha.doubleValue > 0,
+              let bounds = window[kCGWindowBounds as String] as? NSDictionary else { return nil }
+        return CGRect(dictionaryRepresentation: bounds as CFDictionary)
+    }
+}
+
 final class BarWindow: NSPanel {
     let view: BarView
+    let displayFrame: CGRect
     static let defaultHeight: CGFloat = 28
 
     static func height(for cfg: I3Config) -> CGFloat {
@@ -452,6 +473,8 @@ final class BarWindow: NSPanel {
         let h = BarWindow.height(for: controller.config)
         let barY = atBottom ? visible.minY : visible.maxY - h
         let barFrame = NSRect(x: visible.minX, y: barY, width: visible.width, height: h)
+        let displayID = screen.deviceDescription[NSDeviceDescriptionKey("NSScreenNumber")] as? NSNumber
+        self.displayFrame = displayID.map { CGDisplayBounds($0.uint32Value) } ?? .null
         self.view = BarView(frame: NSRect(origin: .zero, size: barFrame.size))
         super.init(contentRect: barFrame, styleMask: [.borderless, .nonactivatingPanel], backing: .buffered, defer: false)
         self.isFloatingPanel = true
@@ -469,6 +492,12 @@ final class BarWindow: NSPanel {
         self.contentView = view
         view.controller = controller
         view.screenRef = screen
+    }
+
+    func setSuppressed(_ suppressed: Bool) {
+        guard ignoresMouseEvents != suppressed else { return }
+        ignoresMouseEvents = suppressed
+        alphaValue = suppressed ? 0 : 1
     }
 
     func refresh() {

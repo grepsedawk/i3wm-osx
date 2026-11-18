@@ -95,6 +95,7 @@ final class I3App {
         }
         center.addObserver(forName: NSWorkspace.activeSpaceDidChangeNotification, object: nil, queue: .main) { [weak self] _ in
             self?.manager.handleSpaceChanged()
+            self?.bar.updateVisibility()
         }
         NotificationCenter.default.addObserver(forName: NSApplication.didChangeScreenParametersNotification, object: nil, queue: .main) { [weak self] _ in
             self?.manager.handleScreensChanged()
@@ -126,6 +127,7 @@ final class I3App {
         timer.setEventHandler { [weak self] in
             guard let self else { return }
             self.manager.pruneTerminatedApplications()
+            self.bar.updateVisibility()
             let now = AXIsProcessTrusted()
             if now && !self.lastTrust {
                 Logger.info("Accessibility trust GAINED — re-bootstrapping window manager")
